@@ -80,6 +80,15 @@
   - 本机离线打 release 会卡在 `lintVital`（`lint-gradle` 没缓存），已在 `app/build.gradle.kts` 里关掉 `checkReleaseBuilds`
   - `build.gradle.kts` 里取 Properties 要写 `import java.util.Properties` + `Properties()`，直接写 `java.util.Properties()` 会报 `Unresolved reference: util`（`java` 被解析成 Gradle 扩展）
 - **模拟器可能被人关掉/抢占**：本机模拟器有时被别的程序占用（截图会变成别的 App），点按自动化不可靠；验证以「装得上、能启动、无崩溃、代码走查」为准
+  - 模拟器被杀掉时用后台任务重开：`emulator.exe -avd Medium_Phone -no-window -no-audio -no-boot-anim -no-snapshot-save -gpu swiftshader_indirect`，等 `getprop sys.boot_completed` 变成 1 再装
+  - 想在没登录真账号的情况下看「选择账号进入」界面：`adb shell "run-as com.gaiding.suggestion cp /data/local/tmp/accounts.xml shared_prefs/accounts.xml"`（用完记得删掉这份假数据）
+- **github.com 时不时连不上（重要）**：本机 DNS 会把 `github.com` 解析到 `20.247.166.64` 这类连不通的地址，直接 `git push` 报 `Failed to connect to github.com port 443` 或 `Recv failure: Connection was reset`。实测可用的 IP：`140.82.113.3`、`140.82.114.3`、`20.205.243.166`。解决办法是给 git 指定解析地址（已写进这个仓库的 `.git/config`）：
+  ```
+  git config http.curloptResolve "github.com:443:140.82.113.3"
+  git push origin main
+  ```
+  （`http.curloptResolve` 要 curl 的 `host:port:ip` 格式；换机器或 IP 失效时换一个上面的 IP 试试，`curl --resolve github.com:443:<ip> https://github.com` 能先验证这个 IP 通不通）
+- **Supabase 域名本机也连不上**：`pnnyujqkkdehfxnmomww.supabase.co` 的 TLS 握手会被重置（`Recv failure: Connection was reset`），而 `supabase.com` 能开。所以「数据库有没有建好、RLS 对不对」只能由用户在自己那边确认，本机只保证编译和本地逻辑
 
 ## 8. 发布流程（每个版本都这么做）
 
