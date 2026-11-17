@@ -3,7 +3,7 @@
 一个自己用的安卓 App：把想法和建议收集起来，由管理员逐条接纳、驳回、标记解决、跟着版本推送。
 一台手机做管理端，其他人的手机做提交端，数据放在 Supabase 免费云端共享。
 
-当前版本：**v0.0.1**（第一个能跑通的版本）
+当前版本：**v0.0.2**（可以发给同学装了）
 
 ---
 
@@ -110,15 +110,39 @@ update public.profiles set is_admin = true where email = '你的管理员邮箱'
 
 ```bash
 ./gradlew assembleDebug
+./gradlew assembleRelease     # 需要仓库根的 keystore.properties，否则出的是未签名包
 ```
 
-产物：`app/build/outputs/apk/debug/app-debug.apk`
+产物：
+
+- 调试包：`app/build/outputs/apk/debug/app-debug.apk`
+- 正式包：`app/build/outputs/apk/release/app-release.apk`（可以发给别人装）
 
 `local.properties` 里写你的 SDK 路径（这个文件不进仓库）：
 
 ```properties
 sdk.dir=D:\\applications\\SDK
 ```
+
+签名信息放在仓库根的 `keystore.properties`（也不进仓库）：
+
+```properties
+storeFile=C:/Users/你的用户名/.android-keystores/suggestion-release.jks
+storePassword=你的密码
+keyAlias=suggestion
+keyPassword=你的密码
+```
+
+> **keystore 一定要备份**。以后要发升级包，必须用同一个 jks 签名；换了签名的包装到旧版本上会提示「应用未安装」，只能卸载重装（数据在云端，不会丢）。
+
+---
+
+## 发给别人装（不用连电脑）
+
+1. 把 `app-release.apk`（或 `dist/` 里的包）通过微信 / QQ / 网盘发给对方
+2. 对方点开安装，系统可能提示「未知来源应用」→ 允许这一个来源安装即可
+3. 对方在 App 里注册自己的账号，然后你在「管理 → 成员权限」里给他勾上能看到/能提建议的项目
+4. 多人同时在用同一个 Supabase 项目，看到的是同一份数据
 
 ---
 
@@ -135,6 +159,7 @@ sdk.dir=D:\\applications\\SDK
 
 | 版本 | 内容 |
 | --- | --- |
+| 0.0.2 | 登录页记住多个账号一键切换、管理员彻底删除项目、正式签名 release 包 |
 | 0.0.1 | 账号系统、项目与权限、提建议、接纳/驳回/解决/推送、已解决页、管理台 |
 
 详细改动见 [log.md](log.md)。

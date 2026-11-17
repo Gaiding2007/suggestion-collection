@@ -94,6 +94,11 @@ object Repo {
         authed("POST", "/rest/v1/rpc/create_suggestion", body, prefer = "return=minimal")
     }
 
+    /** 彻底删掉一个项目：项目里的建议、谁能进的授权靠外键 on delete cascade 一起走。 */
+    suspend fun deleteProject(id: String) {
+        authed("DELETE", "/rest/v1/projects?id=eq.$id", null, prefer = "return=minimal")
+    }
+
     private suspend fun patchSuggestion(id: String, fields: JSONObject) {
         authed("PATCH", "/rest/v1/suggestions?id=eq.$id", fields, prefer = "return=minimal")
     }

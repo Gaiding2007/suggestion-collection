@@ -66,6 +66,7 @@ import com.gaiding.suggestion.Account
 import com.gaiding.suggestion.data.AdminBundle
 import com.gaiding.suggestion.data.AdminSuggestion
 import com.gaiding.suggestion.data.Profile
+import com.gaiding.suggestion.data.Project
 import com.gaiding.suggestion.data.Repo
 import com.gaiding.suggestion.data.Status
 import com.gaiding.suggestion.data.Suggestion
@@ -213,6 +214,10 @@ fun AdminHome(account: Account, onSignOut: () -> Unit) {
                         },
                         onToggleAccess = { projectId, userId, granted ->
                             if (granted) Repo.grantAccess(projectId, userId) else Repo.revokeAccess(projectId, userId)
+                            reload()
+                        },
+                        onDeleteProject = { projectId ->
+                            Repo.deleteProject(projectId)
                             reload()
                         },
                     )
@@ -480,10 +485,12 @@ private fun ManageTab(
     notify: (String) -> Unit,
     onCreateProject: suspend (name: String, desc: String) -> Unit,
     onToggleAccess: suspend (projectId: String, userId: String, granted: Boolean) -> Unit,
+    onDeleteProject: suspend (projectId: String) -> Unit,
 ) {
     val scope = rememberCoroutineScope()
     var showCreate by remember { mutableStateOf(false) }
     var accessUser by remember { mutableStateOf<Profile?>(null) }
+    var deleteTarget by remember { mutableStateOf<Project?>(null) }
 
     val members = bundle.users.filter { !it.isAdmin }
 
@@ -539,6 +546,21 @@ private fun ManageTab(
                                 text = desc,
                                 style = MaterialTheme.typography.bodySmall,
                                 color = InkFaint,
+                            )
+                        }
+                        Spacer(Modifier.height(2.dp))
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.End,
+                        ) {
+                            Text(
+                                text = "删除项目",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = WarnRed,
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .clickable { deleteTarget = project }
+                                    .padding(horizontal = 8.dp, vertical = 6.dp),
                             )
                         }
                     }
@@ -640,6 +662,77 @@ private fun ManageTab(
             },
         )
     }
+
+    val toDelete = deleteTarget
+    if (toDelete != null) {
+        DeleteProjectDialog(
+            project = toDelete,
+            count = bundle.suggestions.count { it.projectId == toDelete.id },
+            onDismiss = { deleteTarget = null },
+            onDelete = {
+                scope.launch {
+                    try {
+                        onDeleteProject(toDelete.id)
+                        deleteTarget = null
+                        notify("项目「${toDelete.name}」已删除")
+                    } catch (e: Exception) {
+                        notify(e.message ?: "删除失败")
+                    }
+                }
+            },
+        )
+    }
+}
+
+/** 彻底删项目：必须手打项目名才允许按「永久删除」。 */
+@Composable
+private fun DeleteProjectDialog(
+    project: Project,
+    count: Int,
+    onDismiss: () -> Unit,
+    onDelete: () -> Unit,
+) {
+    var typed by remember { mutableStateOf("") }
+    val confirmed = typed.trim() == project.name.trim()
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("删除项目「${project.name}」？") },
+        text = {
+            Column {
+                Text(
+                    text = if (count > 0) {
+                        "这个项目里有 $count 条建议，删除后这些建议、以及「谁能进这个项目」的设置会一起消失，没办法恢复。"
+                    } else {
+                        "删除后这个项目、以及「谁能进这个项目」的设置会一起消失，没办法恢复。"
+                    },
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = InkSoft,
+                )
+                Spacer(Modifier.height(14.dp))
+                Text(
+                    text = "想清楚就输入项目名确认：",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = InkFaint,
+                )
+                Spacer(Modifier.height(6.dp))
+                OutlinedTextField(
+                    value = typed,
+                    onValueChange = { typed = it.take(30) },
+                    placeholder = { Text(project.name) },
+                    singleLine = true,
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDelete, enabled = confirmed) {
+                Text("永久删除", color = if (confirmed) WarnRed else InkFaint)
+            }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } },
+    )
 }
 
 @Composable

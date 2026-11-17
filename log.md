@@ -73,13 +73,22 @@
 - 依赖别自动升到最新：compose-bom 用 `2025.06.01`、core-ktx `1.16.0`、activity-compose `1.10.1`、lifecycle `2.9.1`、coroutines `1.10.2`。升上去会要求 AGP 9.1 / compileSdk 37 直接编译失败
 - 模拟器 `emulator-5554`（API 36, x86_64），adb 在 `D:\applications\SDK\platform-tools\adb.exe`
 - PowerShell 里 `curl` 可用（`curl.exe`），但别用 `function H($u){& curl.exe ...}` 这种嵌套写法，会拿到空值
+- **签名**：keystore 在 `C:\Users\14127\.android-keystores\suggestion-release.jks`（alias `suggestion`，密码写在仓库根的 `keystore.properties`，这两个都**不进 git**）。
+  - **一定要备份这个 jks**：丢了以后就没法给已装的 App 发升级包（包名相同但签名不同，安装会报「应用未安装」）
+  - 换机器时把 jks 拷到同一个路径，或改 `keystore.properties` 里的 `storeFile`
+- **打 release**：`gradle assembleRelease`（需要 `keystore.properties` 存在，否则出的是没签名的包）
+  - 本机离线打 release 会卡在 `lintVital`（`lint-gradle` 没缓存），已在 `app/build.gradle.kts` 里关掉 `checkReleaseBuilds`
+  - `build.gradle.kts` 里取 Properties 要写 `import java.util.Properties` + `Properties()`，直接写 `java.util.Properties()` 会报 `Unresolved reference: util`（`java` 被解析成 Gradle 扩展）
+- **模拟器可能被人关掉/抢占**：本机模拟器有时被别的程序占用（截图会变成别的 App），点按自动化不可靠；验证以「装得上、能启动、无崩溃、代码走查」为准
 
 ## 8. 发布流程（每个版本都这么做）
 
-1. 改代码 → `gradle assembleDebug` 通过
+1. 改代码 → `gradle assembleDebug assembleRelease` 都通过
 2. 装到模拟器上点一遍关键流程，没有崩溃
 3. 更新 README 里的版本号和本文件末尾的版本日志
-4. `git add -A && git commit -m "版本描述" && git push`
+4. 把要发的 APK 复制到 `dist/`（已被 gitignore，不提交）
+5. `git add -A && git commit -m "版本描述" && git push`
+6. 给用户的交付说明里写清：装哪个 APK、这版改了什么、数据库要不要补 SQL
 
 ## 9. Supabase 关键信息
 
@@ -94,10 +103,13 @@
 - [ ] 找回密码（发重置邮件）
 - [ ] 推送后给提交人发通知（本地或 FCM）
 - [ ] 建议详情页 + 评论讨论
-- [ ] 管理员删除项目 / 归档项目（表里已有 `is_archived`，界面还没做）
+- [ ] 项目归档（表里已有 `is_archived`，界面还没做；现在只有彻底删除）
 - [ ] 建议列表按状态筛选、按项目筛选
 - [ ] 搜索、分页（建议多了以后必须做）
-- [ ] 正式签名的 release APK
+- [ ] 多管理员 / 给管理员的权限分级
+- [x] 管理员删除项目（0.0.2）
+- [x] 记住多个登录过的账号、一键切换（0.0.2）
+- [x] 正式签名的 release APK（0.0.2）
 
 ---
 
@@ -153,3 +165,35 @@
 - 普通用户在建议卡片上看不到提交人（按设计），管理员能看到
 - 建议一旦推送就不能改，也没有「删除建议」
 - 没有找回密码，忘了只能去 Supabase 后台重置
+
+## v0.0.2 — 2026-11-17
+
+### 新增 / 改动
+
+- **登录页记住多个账号、一键切换**（`data/SessionStore.kt`、`ui/LoginScreen.kt`、`AppRoot.kt`）
+  - 登录过的账号都留在本地，每个账号独立存 access / refresh token；登录页直接列出「选择账号进入」
+  - 点账号就切过去，不用重新输密码；token 过期自动续期，续不上才回登录页
+  - 每个账号右侧「移除」可单独删；底部「用其他账号登录」回到邮箱密码表单，表单里也有「返回账号列表」
+  - 退出登录会把当前账号从记住的列表里一起删掉（安全起见，下次必须重输密码）
+  - 从 0.0.1 升级上来的旧会话会自动搬进新结构，不用重新登录
+- **管理员可以彻底删除项目**（`data/Repo.kt` 的 `deleteProject`、`ui/AdminScreens.kt` 的 `DeleteProjectDialog`）
+  - 管理页每个项目卡片右下角「删除项目」→ 弹窗写清「这个项目里有 N 条建议，删除后一起消失，没办法恢复」
+  - 必须手打项目名才能按「永久删除」，防手滑
+  - 数据库：删项目连带删建议和授权（外键 `on delete cascade`），只有管理员能删（新增 `projects_admin_delete` 策略）
+- **正式签名的 release 包**（`app/build.gradle.kts`）
+  - keystore 在仓库外 `C:\Users\14127\.android-keystores\suggestion-release.jks`，密码在 `keystore.properties`（已 gitignore）
+  - `assembleRelease` 出可分发 APK；debug 包照旧
+  - 版本号 `0.0.2`（versionCode 2）；登录页底部版本号改为读 `BuildConfig.VERSION_NAME`
+- 数据库脚本 `supabase/schema.sql`：`projects` 增加管理员删除策略（**已经在跑 0.0.1 的库要重新执行一次这个脚本**，脚本可重复执行，不会清数据）
+
+### 验证
+
+- `assembleDebug` + `assembleRelease` 都通过；release 包 `apksigner verify` 通过，`versionName=0.0.2`、`versionCode=2`、`minSdk 26`
+- 模拟器在这次验证中途被外部关掉，多账号选择界面没能在机器上点一遍，靠编译 + 代码走查确认；等模拟器恢复后补测
+
+### 已知限制
+
+- 建议仍然不能删除 / 编辑
+- 删除项目不可撤销（弹窗里已写明）
+- 还没有「管理员给自己开项目权限」以外的批量授权操作，人多时得一个个勾
+

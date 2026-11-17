@@ -11,3 +11,6 @@ captures/
 .kotlin/
 dist/
 *.apk
+*.jks
+*.keystore
+keystore.properties

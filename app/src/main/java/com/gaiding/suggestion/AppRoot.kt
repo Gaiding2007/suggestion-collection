@@ -23,6 +23,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.gaiding.suggestion.data.Auth
 import com.gaiding.suggestion.data.Repo
+import com.gaiding.suggestion.data.SavedAccount
 import com.gaiding.suggestion.data.SessionStore
 import com.gaiding.suggestion.data.Supa
 import com.gaiding.suggestion.ui.AdminHome
@@ -41,8 +42,14 @@ class AppSession {
     var busy by mutableStateOf(false)
     var error by mutableStateOf<String?>(null)
     var notice by mutableStateOf<String?>(null)
+    var savedAccounts by mutableStateOf<List<SavedAccount>>(emptyList())
+
+    private fun refreshSaved() {
+        savedAccounts = SessionStore.savedAccounts()
+    }
 
     suspend fun restore() {
+        refreshSaved()
         if (SessionStore.hasSession) {
             try {
                 bindProfile()
@@ -51,6 +58,7 @@ class AppSession {
                 if (e is Supa.ApiException && e.status == 401) {
                     // 登录真的失效了，清掉本地的 token
                     SessionStore.clear()
+                    refreshSaved()
                 } else {
                     // 只是网络或数据库暂时不可用，token 留着，下次启动再试
                     error = friendly(e)
@@ -58,6 +66,33 @@ class AppSession {
             }
         }
         booting = false
+    }
+
+    /** 点登录页上的账号就切过去，不用重新输密码。 */
+    suspend fun switchAccount(uid: String) {
+        error = null
+        notice = null
+        if (!SessionStore.switchTo(uid)) {
+            refreshSaved()
+            return
+        }
+        busy = true
+        try {
+            bindProfile()
+        } catch (e: Exception) {
+            account = null
+            error = friendly(e)
+            if (e is Supa.ApiException && e.status == 401) SessionStore.clear()
+        }
+        refreshSaved()
+        busy = false
+    }
+
+    /** 把这个账号从「记住的账号」里删掉，下次要重新输密码。 */
+    fun forgetAccount(uid: String) {
+        SessionStore.forget(uid)
+        if (account?.id == uid) account = null
+        refreshSaved()
     }
 
     private suspend fun bindProfile() {
@@ -84,6 +119,7 @@ class AppSession {
             // 账号密码是对的，只是资料没读出来（通常是数据库还没建好），token 留着
             error = friendly(e)
         }
+        refreshSaved()
         busy = false
     }
 
@@ -110,6 +146,7 @@ class AppSession {
         } catch (e: Exception) {
             error = friendly(e)
         }
+        refreshSaved()
         busy = false
     }
 
@@ -118,6 +155,7 @@ class AppSession {
         account = null
         error = null
         notice = null
+        refreshSaved()
     }
 
     private fun friendly(e: Throwable): String {
@@ -158,11 +196,14 @@ fun AppRoot() {
             busy = session.busy,
             error = session.error,
             notice = session.notice,
+            saved = session.savedAccounts,
             onSubmit = { register, email, password ->
                 scope.launch {
                     if (register) session.signUp(email, password) else session.signIn(email, password)
                 }
             },
+            onSwitch = { uid -> scope.launch { session.switchAccount(uid) } },
+            onForget = { uid -> session.forgetAccount(uid) },
         )
         account.isAdmin -> AdminHome(
             account = account,

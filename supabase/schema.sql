@@ -1,5 +1,5 @@
 -- ============================================================
--- 建议收集 v0.0.1 数据库结构（Supabase / PostgreSQL）
+-- 建议收集 v0.0.2 数据库结构（Supabase / PostgreSQL）
 --
 -- 用法：
 --   1. 打开 https://supabase.com/dashboard/project/pnnyujqkkdehfxnmomww
@@ -158,6 +158,12 @@ create policy projects_admin_update on public.projects
   for update to authenticated
   using (public.is_admin())
   with check (public.is_admin());
+
+-- 彻底删项目：只有管理员能删。删项目会连带删掉里面的建议和授权（外键 on delete cascade）
+drop policy if exists projects_admin_delete on public.projects;
+create policy projects_admin_delete on public.projects
+  for delete to authenticated
+  using (public.is_admin());
 
 -- project_access：用户看自己的授权，管理员全部可读写
 drop policy if exists project_access_select on public.project_access;

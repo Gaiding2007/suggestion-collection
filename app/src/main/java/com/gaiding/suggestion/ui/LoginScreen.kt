@@ -42,8 +42,11 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.gaiding.suggestion.BuildConfig
 import com.gaiding.suggestion.R
+import com.gaiding.suggestion.data.SavedAccount
 import com.gaiding.suggestion.ui.theme.AppBg
 import com.gaiding.suggestion.ui.theme.Brand
 import com.gaiding.suggestion.ui.theme.Ink
@@ -56,14 +59,19 @@ fun LoginScreen(
     busy: Boolean,
     error: String?,
     notice: String?,
+    saved: List<SavedAccount>,
     onSubmit: (register: Boolean, email: String, password: String) -> Unit,
+    onSwitch: (uid: String) -> Unit,
+    onForget: (uid: String) -> Unit,
 ) {
     var register by remember { mutableStateOf(false) }
     var email by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
     var showPassword by remember { mutableStateOf(false) }
     var localError by remember { mutableStateOf<String?>(null) }
+    var manualLogin by remember { mutableStateOf(false) }
 
+    val showPicker = saved.isNotEmpty() && !manualLogin
     val canSubmit = email.contains("@") && password.length >= 6 && !busy
 
     Box(
@@ -116,116 +124,276 @@ fun LoginScreen(
                 modifier = Modifier.fillMaxWidth(),
             ) {
                 Column(Modifier.padding(20.dp)) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(13.dp))
-                            .background(Color(0xFFF1F2F8))
-                            .padding(4.dp),
-                    ) {
-                        SegmentTab("登录", selected = !register, Modifier.weight(1f)) {
-                            register = false
-                            localError = null
-                        }
-                        SegmentTab("注册", selected = register, Modifier.weight(1f)) {
-                            register = true
-                            localError = null
-                        }
+                    if (showPicker) {
+                        AccountPicker(
+                            saved = saved,
+                            busy = busy,
+                            error = error,
+                            notice = notice,
+                            onSwitch = onSwitch,
+                            onForget = onForget,
+                            onManual = { manualLogin = true },
+                        )
+                    } else {
+                        LoginForm(
+                            register = register,
+                            email = email,
+                            password = password,
+                            showPassword = showPassword,
+                            busy = busy,
+                            localError = localError,
+                            error = error,
+                            notice = notice,
+                            canSubmit = canSubmit,
+                            canGoBack = saved.isNotEmpty(),
+                            onRegister = {
+                                register = it
+                                localError = null
+                            },
+                            onEmail = { email = it.trim() },
+                            onPassword = { password = it },
+                            onTogglePassword = { showPassword = !showPassword },
+                            onBack = { manualLogin = false },
+                            onSubmitClick = {
+                                localError = null
+                                if (!email.contains("@")) {
+                                    localError = "请输入正确的邮箱"
+                                } else if (password.length < 6) {
+                                    localError = "密码至少 6 位"
+                                } else {
+                                    onSubmit(register, email, password)
+                                }
+                            },
+                        )
                     }
-
-                    Spacer(Modifier.height(20.dp))
-
-                    OutlinedTextField(
-                        value = email,
-                        onValueChange = { email = it.trim() },
-                        label = { Text("邮箱") },
-                        singleLine = true,
-                        shape = RoundedCornerShape(13.dp),
-                        keyboardOptions = KeyboardOptions(
-                            keyboardType = KeyboardType.Email,
-                            imeAction = ImeAction.Next,
-                        ),
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                    Spacer(Modifier.height(12.dp))
-                    OutlinedTextField(
-                        value = password,
-                        onValueChange = { password = it },
-                        label = { Text("密码（至少 6 位）") },
-                        singleLine = true,
-                        shape = RoundedCornerShape(13.dp),
-                        visualTransformation = if (showPassword) VisualTransformation.None else PasswordVisualTransformation(),
-                        keyboardOptions = KeyboardOptions(
-                            keyboardType = KeyboardType.Password,
-                            imeAction = ImeAction.Done,
-                        ),
-                        trailingIcon = {
-                            TextButton(onClick = { showPassword = !showPassword }) {
-                                Text(
-                                    text = if (showPassword) "隐藏" else "显示",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = Brand,
-                                )
-                            }
-                        },
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-
-                    Spacer(Modifier.height(14.dp))
-                    InfoBanner(localError ?: error)
-                    if (notice != null) {
-                        Spacer(Modifier.height(10.dp))
-                        Surface(color = Color(0xFFE9F7F0), shape = RoundedCornerShape(12.dp)) {
-                            Text(
-                                text = notice,
-                                color = Color(0xFF13795B),
-                                style = MaterialTheme.typography.bodySmall,
-                                modifier = Modifier.padding(horizontal = 13.dp, vertical = 10.dp),
-                            )
-                        }
-                    }
-
-                    Spacer(Modifier.height(18.dp))
-                    PrimaryButton(
-                        text = if (register) "注册并进入" else "登录",
-                        loading = busy,
-                        enabled = canSubmit,
-                        modifier = Modifier.fillMaxWidth(),
-                        onClick = {
-                            localError = null
-                            if (!email.contains("@")) {
-                                localError = "请输入正确的邮箱"
-                            } else if (password.length < 6) {
-                                localError = "密码至少 6 位"
-                            } else {
-                                onSubmit(register, email, password)
-                            }
-                        },
-                    )
-
-                    Spacer(Modifier.height(12.dp))
-                    Text(
-                        text = if (register) {
-                            "注册后需要管理员给你开放项目，才能进入项目和提建议"
-                        } else {
-                            "还没有账号？点上面的「注册」"
-                        },
-                        style = MaterialTheme.typography.bodySmall,
-                        color = InkFaint,
-                        textAlign = TextAlign.Center,
-                        modifier = Modifier.fillMaxWidth(),
-                    )
                 }
             }
 
             Spacer(Modifier.height(24.dp))
             Text(
-                text = "v0.0.1",
+                text = "v${BuildConfig.VERSION_NAME}",
                 style = MaterialTheme.typography.labelSmall,
                 color = InkFaint,
             )
             Spacer(Modifier.height(24.dp))
         }
+    }
+}
+
+/** 登录过的账号列表：点一下直接进，不用重新输密码。 */
+@Composable
+private fun AccountPicker(
+    saved: List<SavedAccount>,
+    busy: Boolean,
+    error: String?,
+    notice: String?,
+    onSwitch: (uid: String) -> Unit,
+    onForget: (uid: String) -> Unit,
+    onManual: () -> Unit,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = "选择账号进入",
+            style = MaterialTheme.typography.titleMedium,
+            color = Ink,
+            fontWeight = FontWeight.SemiBold,
+            modifier = Modifier.weight(1f),
+        )
+        if (busy) {
+            Text(
+                text = "正在进入…",
+                style = MaterialTheme.typography.bodySmall,
+                color = InkFaint,
+            )
+        }
+    }
+
+    Spacer(Modifier.height(6.dp))
+
+    InfoBanner(error)
+    if (error != null) Spacer(Modifier.height(10.dp))
+    if (notice != null) {
+        NoticeBox(notice)
+        Spacer(Modifier.height(10.dp))
+    }
+
+    saved.forEachIndexed { index, acc ->
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(12.dp))
+                .clickable(enabled = !busy) { onSwitch(acc.uid) }
+                .padding(vertical = 11.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Avatar(acc.email.take(1).uppercase(), size = 36)
+            Spacer(Modifier.width(12.dp))
+            Column(Modifier.weight(1f)) {
+                Text(
+                    text = acc.email.substringBefore("@").ifBlank { "这个账号" },
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = Ink,
+                    fontWeight = FontWeight.Medium,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    text = acc.email,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = InkFaint,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            Text(
+                text = "移除",
+                style = MaterialTheme.typography.bodySmall,
+                color = InkFaint,
+                modifier = Modifier
+                    .clip(RoundedCornerShape(8.dp))
+                    .clickable(enabled = !busy) { onForget(acc.uid) }
+                    .padding(horizontal = 8.dp, vertical = 6.dp),
+            )
+        }
+        if (index != saved.lastIndex) {
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .height(1.dp)
+                    .background(LineSoft),
+            )
+        }
+    }
+
+    Spacer(Modifier.height(16.dp))
+    SecondaryButton(
+        text = "用其他账号登录",
+        modifier = Modifier.fillMaxWidth(),
+        onClick = onManual,
+    )
+}
+
+@Composable
+private fun LoginForm(
+    register: Boolean,
+    email: String,
+    password: String,
+    showPassword: Boolean,
+    busy: Boolean,
+    localError: String?,
+    error: String?,
+    notice: String?,
+    canSubmit: Boolean,
+    canGoBack: Boolean,
+    onRegister: (Boolean) -> Unit,
+    onEmail: (String) -> Unit,
+    onPassword: (String) -> Unit,
+    onTogglePassword: () -> Unit,
+    onBack: () -> Unit,
+    onSubmitClick: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(13.dp))
+            .background(Color(0xFFF1F2F8))
+            .padding(4.dp),
+    ) {
+        SegmentTab("登录", selected = !register, Modifier.weight(1f)) { onRegister(false) }
+        SegmentTab("注册", selected = register, Modifier.weight(1f)) { onRegister(true) }
+    }
+
+    Spacer(Modifier.height(20.dp))
+
+    OutlinedTextField(
+        value = email,
+        onValueChange = onEmail,
+        label = { Text("邮箱") },
+        singleLine = true,
+        shape = RoundedCornerShape(13.dp),
+        keyboardOptions = KeyboardOptions(
+            keyboardType = KeyboardType.Email,
+            imeAction = ImeAction.Next,
+        ),
+        modifier = Modifier.fillMaxWidth(),
+    )
+    Spacer(Modifier.height(12.dp))
+    OutlinedTextField(
+        value = password,
+        onValueChange = onPassword,
+        label = { Text("密码（至少 6 位）") },
+        singleLine = true,
+        shape = RoundedCornerShape(13.dp),
+        visualTransformation = if (showPassword) VisualTransformation.None else PasswordVisualTransformation(),
+        keyboardOptions = KeyboardOptions(
+            keyboardType = KeyboardType.Password,
+            imeAction = ImeAction.Done,
+        ),
+        trailingIcon = {
+            TextButton(onClick = onTogglePassword) {
+                Text(
+                    text = if (showPassword) "隐藏" else "显示",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Brand,
+                )
+            }
+        },
+        modifier = Modifier.fillMaxWidth(),
+    )
+
+    Spacer(Modifier.height(14.dp))
+    InfoBanner(localError ?: error)
+    if (notice != null) {
+        Spacer(Modifier.height(10.dp))
+        NoticeBox(notice)
+    }
+
+    Spacer(Modifier.height(18.dp))
+    PrimaryButton(
+        text = if (register) "注册并进入" else "登录",
+        loading = busy,
+        enabled = canSubmit,
+        modifier = Modifier.fillMaxWidth(),
+        onClick = onSubmitClick,
+    )
+
+    Spacer(Modifier.height(12.dp))
+    Text(
+        text = if (register) {
+            "注册后需要管理员给你开放项目，才能进入项目和提建议"
+        } else {
+            "还没有账号？点上面的「注册」"
+        },
+        style = MaterialTheme.typography.bodySmall,
+        color = InkFaint,
+        textAlign = TextAlign.Center,
+        modifier = Modifier.fillMaxWidth(),
+    )
+
+    if (canGoBack) {
+        Spacer(Modifier.height(4.dp))
+        TextButton(onClick = onBack, modifier = Modifier.fillMaxWidth()) {
+            Text(
+                text = "返回账号列表",
+                style = MaterialTheme.typography.bodySmall,
+                color = Brand,
+            )
+        }
+    }
+}
+
+@Composable
+private fun NoticeBox(text: String) {
+    Surface(color = Color(0xFFE9F7F0), shape = RoundedCornerShape(12.dp)) {
+        Text(
+            text = text,
+            color = Color(0xFF13795B),
+            style = MaterialTheme.typography.bodySmall,
+            modifier = Modifier.padding(horizontal = 13.dp, vertical = 10.dp),
+        )
     }
 }
 
