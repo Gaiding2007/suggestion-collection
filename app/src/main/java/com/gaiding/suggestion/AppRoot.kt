@@ -44,6 +44,9 @@ class AppSession {
     var notice by mutableStateOf<String?>(null)
     var savedAccounts by mutableStateOf<List<SavedAccount>>(emptyList())
 
+    /** 登录页要不要直接显示邮箱密码表单（点「用其他账号登录」时为 true）。 */
+    var wantForm by mutableStateOf(false)
+
     private fun refreshSaved() {
         savedAccounts = SessionStore.savedAccounts()
     }
@@ -72,6 +75,7 @@ class AppSession {
     suspend fun switchAccount(uid: String) {
         error = null
         notice = null
+        wantForm = false
         if (!SessionStore.switchTo(uid)) {
             refreshSaved()
             return
@@ -119,6 +123,7 @@ class AppSession {
             // 账号密码是对的，只是资料没读出来（通常是数据库还没建好），token 留着
             error = friendly(e)
         }
+        wantForm = false
         refreshSaved()
         busy = false
     }
@@ -146,15 +151,28 @@ class AppSession {
         } catch (e: Exception) {
             error = friendly(e)
         }
+        wantForm = false
         refreshSaved()
         busy = false
     }
 
     suspend fun signOut() {
-        Auth.signOut()
+        // 只退出登录态，账号还留在登录页的列表里，点一下就能回来
+        Auth.signOut(keepAccounts = true)
         account = null
         error = null
         notice = null
+        wantForm = false
+        refreshSaved()
+    }
+
+    /** 「用其他账号登录」：退出当前账号，并直接打开邮箱密码表单。 */
+    suspend fun signOutToForm() {
+        Auth.signOut(keepAccounts = true)
+        account = null
+        error = null
+        notice = null
+        wantForm = true
         refreshSaved()
     }
 
@@ -197,6 +215,8 @@ fun AppRoot() {
             error = session.error,
             notice = session.notice,
             saved = session.savedAccounts,
+            startWithForm = session.wantForm,
+            onFormConsumed = { session.wantForm = false },
             onSubmit = { register, email, password ->
                 scope.launch {
                     if (register) session.signUp(email, password) else session.signIn(email, password)
@@ -207,10 +227,16 @@ fun AppRoot() {
         )
         account.isAdmin -> AdminHome(
             account = account,
+            savedAccounts = session.savedAccounts,
+            onSwitchAccount = { uid -> scope.launch { session.switchAccount(uid) } },
+            onUseOtherAccount = { scope.launch { session.signOutToForm() } },
             onSignOut = { scope.launch { session.signOut() } },
         )
         else -> UserHome(
             account = account,
+            savedAccounts = session.savedAccounts,
+            onSwitchAccount = { uid -> scope.launch { session.switchAccount(uid) } },
+            onUseOtherAccount = { scope.launch { session.signOutToForm() } },
             onSignOut = { scope.launch { session.signOut() } },
         )
     }

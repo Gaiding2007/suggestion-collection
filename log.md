@@ -117,8 +117,9 @@
 - [ ] 搜索、分页（建议多了以后必须做）
 - [ ] 多管理员 / 给管理员的权限分级
 - [x] 管理员删除项目（0.0.2）
-- [x] 记住多个登录过的账号、一键切换（0.0.2）
+- [x] 记住多个登录过的账号、一键切换（0.0.2，0.0.3 修正了「退出就忘记账号」的问题）
 - [x] 正式签名的 release APK（0.0.2）
+- [x] 顶部栏一键切换账号按钮（0.0.3）
 
 ---
 
@@ -183,7 +184,7 @@
   - 登录过的账号都留在本地，每个账号独立存 access / refresh token；登录页直接列出「选择账号进入」
   - 点账号就切过去，不用重新输密码；token 过期自动续期，续不上才回登录页
   - 每个账号右侧「移除」可单独删；底部「用其他账号登录」回到邮箱密码表单，表单里也有「返回账号列表」
-  - 退出登录会把当前账号从记住的列表里一起删掉（安全起见，下次必须重输密码）
+  - 退出登录会把当前账号从记住的列表里一起删掉（安全起见，下次必须重输密码）——**0.0.3 起改了：退出不再删账号，只有点「移除」才删，见下方 v0.0.3**
   - 从 0.0.1 升级上来的旧会话会自动搬进新结构，不用重新登录
 - **管理员可以彻底删除项目**（`data/Repo.kt` 的 `deleteProject`、`ui/AdminScreens.kt` 的 `DeleteProjectDialog`）
   - 管理页每个项目卡片右下角「删除项目」→ 弹窗写清「这个项目里有 N 条建议，删除后一起消失，没办法恢复」
@@ -205,4 +206,47 @@
 - 建议仍然不能删除 / 编辑
 - 删除项目不可撤销（弹窗里已写明）
 - 还没有「管理员给自己开项目权限」以外的批量授权操作，人多时得一个个勾
+
+## v0.0.3 — 2026-11-17
+
+修用户报的两个问题，并加一个入口。
+
+### 1. 「项目删除显示成功但没删」——不是网络问题，是数据库静默拒绝
+
+- 原因：`data/Repo.kt` 的 `deleteProject` 当年用 `Prefer: return=minimal`。PostgREST 在 RLS 拒绝删除时**不报错**，只是删了 0 行、回 `204`，客户端就当成成功了。真正的原因是库里没有 `projects_admin_delete` 策略（0.0.2 才加的，库没重跑脚本），或者当前账号不是管理员。
+- 改法（`data/Repo.kt`）：
+  - `Prefer: return=representation`，把删掉的行要回来；`rows.length() == 0` 就抛 `Supa.ApiException(403, "项目没被删掉：数据库没有同意删除...")`
+  - `ui/AdminScreens.kt` 的 `onDeleteProject` 再补一层端到端确认：删完重新查一遍项目列表，项目还在就抛 409「项目还在：数据库没有真正删除...」，绝不让界面说「已删除」
+- **用户侧要做的**：去 Supabase 的 SQL Editor 把 `supabase/schema.sql` 重新执行一次（可重复执行，不会清数据）
+
+### 2. 「选择账号进入没看见」——退出登录把账号忘了
+
+- 原因：`AppSession.signOut()` → `Auth.signOut()` → `SessionStore.clear()`，而 `clear()` 的实现是 `forget(uid)`，等于退出时把账号从记住列表里删掉，列表永远是空的，登录页只能显示表单。
+- 改法：
+  - `data/SessionStore.kt` 新增 `leaveCurrent()`：只去掉「当前账号」，账号和 token 都留着；`clear()` 保留原语义（彻底忘掉）供 401 用
+  - `data/Auth.kt`：`signOut(keepAccounts: Boolean = true)`，true 时只 `leaveCurrent()` 且**不**调服务端 `/auth/v1/logout`（否则 refresh token 被吊销，快速切换就废了）；false 时维持旧行为
+  - `AppRoot.kt`：`signOut()` 改成 `keepAccounts = true`；新增 `signOutToForm()`（退出并直接打开邮箱密码表单）；新增 `AppSession.wantForm` 让「用其他账号登录」能一次性跳转
+  - 退出弹窗文案改为「退出后会回到登录页，这个账号还留在账号列表里，点一下就能直接回来。不想让别人进去，就在登录页点「移除」」
+
+### 3. 新增「切换」按钮（退出键旁边）
+
+- 新文件 `app/src/main/java/com/gaiding/suggestion/ui/AccountSwitch.kt`：`AccountSwitchDialog(saved, currentUid, onSwitch, onUseOther, onDismiss)`
+  - 列出记住的账号，当前账号标「当前」并高亮；点一个直接进去（不用输密码）
+  - 底部「用其他账号登录」→ 退出当前账号并打开邮箱密码表单（当前账号会留在列表里）
+  - 系统图标集里没有 `Icons.*SwitchAccount`（只在 material-icons-extended 里，没引这个依赖），所以按钮用文字「切换」
+- `ui/AdminScreens.kt` / `ui/UserScreens.kt`：顶栏 actions 最前面加「切换」按钮，新增 `savedAccounts` / `onSwitchAccount` / `onUseOtherAccount` 三个参数
+- 一个副作用要知道：退出时不再吊销服务端 refresh token，token 会随账号一起留在本机（下次一键登录靠它）。公共设备上请点「移除」把账号彻底抹掉
+
+### 验证
+
+- `assembleDebug` + `assembleRelease` 通过；`aapt2 dump badging` 确认 `versionCode=3`、`versionName=0.0.3`
+- release 包 `SHA-256 E961BC9D2650D947233D1FEE3672F16A7381B32AFCC90C8144CC4BCEFA5BA36C`（0.0.2 的是 `FBFCC2A2…`）；解包 `classes2.dex` 里能搜到 `AccountSwitchDialog` / `leaveCurrent` / `wantForm` / `signOutToForm`，确认新代码确实打进包了
+- 模拟器上 `adb install -r` + 启动正常，登录页页脚显示 `v0.0.3`，无崩溃
+- 本机仍然连不上 `*.supabase.co`（TLS 被重置），真实账号的「删除项目成功/失败提示」「账号切换」没能联网点一遍，靠编译 + 代码走查 + 单元级判断确认
+
+### 已知限制
+
+- 删除项目仍然不可撤销
+- 本机无法联调 Supabase，线上行为要等用户装 0.0.3 后实测
+
 

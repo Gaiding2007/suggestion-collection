@@ -68,8 +68,10 @@ import com.gaiding.suggestion.data.AdminSuggestion
 import com.gaiding.suggestion.data.Profile
 import com.gaiding.suggestion.data.Project
 import com.gaiding.suggestion.data.Repo
+import com.gaiding.suggestion.data.SavedAccount
 import com.gaiding.suggestion.data.Status
 import com.gaiding.suggestion.data.Suggestion
+import com.gaiding.suggestion.data.Supa
 import com.gaiding.suggestion.ui.theme.AppBg
 import com.gaiding.suggestion.ui.theme.Brand
 import com.gaiding.suggestion.ui.theme.BrandSoft
@@ -85,7 +87,13 @@ import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun AdminHome(account: Account, onSignOut: () -> Unit) {
+fun AdminHome(
+    account: Account,
+    savedAccounts: List<SavedAccount> = emptyList(),
+    onSwitchAccount: (uid: String) -> Unit = {},
+    onUseOtherAccount: () -> Unit = {},
+    onSignOut: () -> Unit = {},
+) {
     val scope = rememberCoroutineScope()
     val snackbar = remember { SnackbarHostState() }
     var bundle by remember { mutableStateOf<AdminBundle?>(null) }
@@ -93,6 +101,7 @@ fun AdminHome(account: Account, onSignOut: () -> Unit) {
     var error by remember { mutableStateOf<String?>(null) }
     var tab by remember { mutableIntStateOf(0) }
     var askLogout by remember { mutableStateOf(false) }
+    var askSwitch by remember { mutableStateOf(false) }
     var reloadTick by remember { mutableIntStateOf(0) }
 
     suspend fun reload() {
@@ -146,6 +155,9 @@ fun AdminHome(account: Account, onSignOut: () -> Unit) {
                 },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = AppBg),
                 actions = {
+                    TextButton(onClick = { askSwitch = true }) {
+                        Text("切换", color = InkSoft)
+                    }
                     IconButton(onClick = { reloadTick++ }) {
                         Icon(Icons.Default.Refresh, contentDescription = "刷新", tint = InkSoft)
                     }
@@ -218,6 +230,14 @@ fun AdminHome(account: Account, onSignOut: () -> Unit) {
                         },
                         onDeleteProject = { projectId ->
                             Repo.deleteProject(projectId)
+                            // 再查一遍确认真的没了：删不掉的时候不能让界面说「已删除」
+                            if (Repo.projects().any { it.id == projectId }) {
+                                throw Supa.ApiException(
+                                    409,
+                                    "项目还在：数据库没有真正删除。请确认已经在 SQL Editor 里" +
+                                        "重新执行过 supabase/schema.sql，并且当前账号是管理员。",
+                                )
+                            }
                             reload()
                         },
                     )
@@ -230,7 +250,12 @@ fun AdminHome(account: Account, onSignOut: () -> Unit) {
         AlertDialog(
             onDismissRequest = { askLogout = false },
             title = { Text("退出登录？") },
-            text = { Text("退出后需要重新输入邮箱和密码。") },
+            text = {
+                Text(
+                    "退出后会回到登录页，这个账号还留在账号列表里，点一下就能直接回来。" +
+                        "不想让别人进去，就在登录页点「移除」。",
+                )
+            },
             confirmButton = {
                 TextButton(onClick = {
                     askLogout = false
@@ -238,6 +263,22 @@ fun AdminHome(account: Account, onSignOut: () -> Unit) {
                 }) { Text("退出", color = WarnRed) }
             },
             dismissButton = { TextButton(onClick = { askLogout = false }) { Text("取消") } },
+        )
+    }
+
+    if (askSwitch) {
+        AccountSwitchDialog(
+            saved = savedAccounts,
+            currentUid = account.id,
+            onSwitch = { uid ->
+                askSwitch = false
+                onSwitchAccount(uid)
+            },
+            onUseOther = {
+                askSwitch = false
+                onUseOtherAccount()
+            },
+            onDismiss = { askSwitch = false },
         )
     }
 }

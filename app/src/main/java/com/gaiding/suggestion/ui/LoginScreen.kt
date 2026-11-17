@@ -27,6 +27,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -63,13 +64,22 @@ fun LoginScreen(
     onSubmit: (register: Boolean, email: String, password: String) -> Unit,
     onSwitch: (uid: String) -> Unit,
     onForget: (uid: String) -> Unit,
+    startWithForm: Boolean = false,
+    onFormConsumed: () -> Unit = {},
 ) {
     var register by remember { mutableStateOf(false) }
     var email by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
     var showPassword by remember { mutableStateOf(false) }
     var localError by remember { mutableStateOf<String?>(null) }
-    var manualLogin by remember { mutableStateOf(false) }
+    var manualLogin by remember { mutableStateOf(startWithForm) }
+
+    LaunchedEffect(startWithForm) {
+        if (startWithForm) {
+            manualLogin = true
+            onFormConsumed()
+        }
+    }
 
     val showPicker = saved.isNotEmpty() && !manualLogin
     val canSubmit = email.contains("@") && password.length >= 6 && !busy

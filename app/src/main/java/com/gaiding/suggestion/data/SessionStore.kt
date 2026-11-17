@@ -126,7 +126,16 @@ object SessionStore {
         expiresAt = expires
     }
 
-    /** 退出当前账号：从记住的列表里一起删掉，下次必须重新输密码。 */
+    /**
+     * 退出登录，但账号留在「记住的账号」里：下次打开登录页点一下就能直接回来。
+     * （token 保留，所以不用重新输密码；想彻底删掉用 [forget]）
+     */
+    fun leaveCurrent() {
+        prefs.edit().remove(KEY_CURRENT).apply()
+        clearFields()
+    }
+
+    /** 彻底忘掉当前账号：从记住的列表里一起删掉，下次必须重新输密码。 */
     fun clear() {
         val uid = userId
         if (uid == null) {

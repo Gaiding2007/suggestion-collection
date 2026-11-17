@@ -67,6 +67,7 @@ import androidx.compose.ui.window.DialogProperties
 import com.gaiding.suggestion.Account
 import com.gaiding.suggestion.data.Project
 import com.gaiding.suggestion.data.Repo
+import com.gaiding.suggestion.data.SavedAccount
 import com.gaiding.suggestion.data.Status
 import com.gaiding.suggestion.data.Suggestion
 import com.gaiding.suggestion.ui.theme.AppBg
@@ -83,7 +84,13 @@ import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun UserHome(account: Account, onSignOut: () -> Unit) {
+fun UserHome(
+    account: Account,
+    savedAccounts: List<SavedAccount> = emptyList(),
+    onSwitchAccount: (uid: String) -> Unit = {},
+    onUseOtherAccount: () -> Unit = {},
+    onSignOut: () -> Unit = {},
+) {
     var projects by remember { mutableStateOf(emptyList<Project>()) }
     var counts by remember { mutableStateOf(emptyMap<String, Int>()) }
     var loading by remember { mutableStateOf(true) }
@@ -91,6 +98,7 @@ fun UserHome(account: Account, onSignOut: () -> Unit) {
     var reloadKey by remember { mutableIntStateOf(0) }
     var opened by remember { mutableStateOf<Project?>(null) }
     var askLogout by remember { mutableStateOf(false) }
+    var askSwitch by remember { mutableStateOf(false) }
 
     LaunchedEffect(reloadKey) {
         loading = true
@@ -121,6 +129,9 @@ fun UserHome(account: Account, onSignOut: () -> Unit) {
                 title = { Text("我的项目", style = MaterialTheme.typography.titleLarge, color = Ink) },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = AppBg),
                 actions = {
+                    TextButton(onClick = { askSwitch = true }) {
+                        Text("切换", color = InkSoft)
+                    }
                     IconButton(onClick = { reloadKey++ }) {
                         Icon(Icons.Default.Refresh, contentDescription = "刷新", tint = InkSoft)
                     }
@@ -174,7 +185,12 @@ fun UserHome(account: Account, onSignOut: () -> Unit) {
         AlertDialog(
             onDismissRequest = { askLogout = false },
             title = { Text("退出登录？") },
-            text = { Text("退出后需要重新输入邮箱和密码。") },
+            text = {
+                Text(
+                    "退出后会回到登录页，这个账号还留在账号列表里，点一下就能直接回来。" +
+                        "不想让别人进去，就在登录页点「移除」。",
+                )
+            },
             confirmButton = {
                 TextButton(onClick = {
                     askLogout = false
@@ -182,6 +198,22 @@ fun UserHome(account: Account, onSignOut: () -> Unit) {
                 }) { Text("退出", color = WarnRed) }
             },
             dismissButton = { TextButton(onClick = { askLogout = false }) { Text("取消") } },
+        )
+    }
+
+    if (askSwitch) {
+        AccountSwitchDialog(
+            saved = savedAccounts,
+            currentUid = account.id,
+            onSwitch = { uid ->
+                askSwitch = false
+                onSwitchAccount(uid)
+            },
+            onUseOther = {
+                askSwitch = false
+                onUseOtherAccount()
+            },
+            onDismiss = { askSwitch = false },
         )
     }
 }

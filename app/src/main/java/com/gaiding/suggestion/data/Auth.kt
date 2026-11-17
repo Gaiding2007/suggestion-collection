@@ -72,7 +72,18 @@ object Auth {
         }
     }
 
-    suspend fun signOut() {
+    /**
+     * 退出当前账号。
+     *
+     * @param keepAccounts true = 只退出登录态，账号留在登录页的账号列表里，点一下就能直接回来
+     *                     （不通知服务端登出，否则 refresh token 会被吊销，快速切换就失效了）；
+     *                     false = 本地 token 一起删掉，并尽力通知服务端登出。
+     */
+    suspend fun signOut(keepAccounts: Boolean = true) {
+        if (keepAccounts) {
+            SessionStore.leaveCurrent()
+            return
+        }
         val token = SessionStore.accessToken ?: SessionStore.refreshToken
         SessionStore.clear()
         if (token != null) {

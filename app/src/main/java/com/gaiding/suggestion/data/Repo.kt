@@ -94,9 +94,28 @@ object Repo {
         authed("POST", "/rest/v1/rpc/create_suggestion", body, prefer = "return=minimal")
     }
 
-    /** 彻底删掉一个项目：项目里的建议、谁能进的授权靠外键 on delete cascade 一起走。 */
+    /**
+     * 彻底删掉一个项目：项目里的建议、谁能进的授权靠外键 on delete cascade 一起走。
+     *
+     * 用 return=representation 要回被删掉的行：数据库的 RLS 把删除挡下来时，
+     * PostgREST 不会报错，只会「什么都没删」并返回 204，客户端就以为成功了。
+     * 这里靠返回的行数判断，0 行就当失败抛出去，别让界面骗人。
+     */
     suspend fun deleteProject(id: String) {
-        authed("DELETE", "/rest/v1/projects?id=eq.$id", null, prefer = "return=minimal")
+        val text = authed(
+            "DELETE",
+            "/rest/v1/projects?id=eq.$id",
+            null,
+            prefer = "return=representation",
+        )
+        if (Supa.arr(text).length() == 0) {
+            throw Supa.ApiException(
+                403,
+                "项目没被删掉：数据库没有同意删除。多半是删除规则还没同步" +
+                    "（去 Supabase 的 SQL Editor 把 supabase/schema.sql 再执行一次），" +
+                    "或者当前账号不是管理员。",
+            )
+        }
     }
 
     private suspend fun patchSuggestion(id: String, fields: JSONObject) {
