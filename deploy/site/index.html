@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>建议收集 · 下载</title>
+<style>
+  :root {
+    --brand: #4e6af0;
+    --brand-deep: #3348c9;
+    --brand-soft: #eef1ff;
+    --ink: #1b1e2b;
+    --ink-soft: #5b6072;
+    --ink-faint: #8b90a3;
+    --line: #e9eaf2;
+    --bg: #f5f6fa;
+    --white: #fff;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+      "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+    line-height: 1.6;
+    padding: 28px 18px 44px;
+  }
+  .wrap { max-width: 520px; margin: 0 auto; }
+  .head { text-align: center; margin-bottom: 22px; }
+  .logo {
+    width: 76px; height: 76px; border-radius: 22px; background: var(--brand);
+    display: inline-flex; align-items: center; justify-content: center;
+    box-shadow: 0 10px 24px rgba(78, 106, 240, 0.28);
+    margin-bottom: 14px;
+  }
+  h1 { font-size: 27px; letter-spacing: 1px; margin: 0 0 6px; }
+  .sub { color: var(--ink-faint); font-size: 14px; margin: 0; }
+  .card {
+    background: var(--white); border-radius: 20px; padding: 20px;
+    box-shadow: 0 1px 0 rgba(27, 30, 43, 0.04); margin-bottom: 14px;
+  }
+  .row { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+  .ver { font-size: 22px; font-weight: 700; }
+  .tag {
+    background: var(--brand-soft); color: var(--brand); font-size: 12px;
+    font-weight: 600; border-radius: 999px; padding: 3px 10px;
+  }
+  .meta { color: var(--ink-faint); font-size: 12.5px; margin-top: 8px; }
+  .notes { color: var(--ink-soft); font-size: 13.5px; margin-top: 12px; }
+  .btn {
+    display: block; margin-top: 18px; text-align: center; text-decoration: none;
+    background: var(--brand); color: #fff; font-size: 16px; font-weight: 600;
+    padding: 15px; border-radius: 14px;
+    box-shadow: 0 8px 18px rgba(78, 106, 240, 0.26);
+  }
+  .btn:active { background: var(--brand-deep); }
+  .btn.ghost {
+    background: var(--white); color: var(--brand); box-shadow: none;
+    border: 1px solid var(--line);
+  }
+  h2 { font-size: 15px; margin: 0 0 10px; }
+  ol { margin: 0; padding-left: 20px; color: var(--ink-soft); font-size: 13.5px; }
+  ol li { margin-bottom: 7px; }
+  .history a {
+    display: flex; justify-content: space-between; gap: 12px; align-items: center;
+    padding: 12px 2px; text-decoration: none; color: var(--ink);
+    border-top: 1px solid var(--line); font-size: 14px;
+  }
+  .history a:first-of-type { border-top: none; }
+  .history small { color: var(--ink-faint); font-size: 12px; flex: none; }
+  .empty { color: var(--ink-faint); font-size: 13.5px; }
+  footer { text-align: center; color: var(--ink-faint); font-size: 12px; margin-top: 22px; }
+  code { background: #f0f1f7; border-radius: 6px; padding: 1px 6px; font-size: 12.5px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="head">
+    <div class="logo" aria-hidden="true">
+      <svg width="42" height="42" viewBox="0 0 56 50" fill="none">
+        <path d="M8 2h40a6 6 0 0 1 6 6v22a6 6 0 0 1-6 6H26l-9 9v-9H8a6 6 0 0 1-6-6V8a6 6 0 0 1 6-6z" fill="#fff"/>
+        <circle cx="18" cy="19" r="4" fill="#ffc24a"/>
+        <circle cx="28" cy="19" r="4" fill="#ffc24a"/>
+        <circle cx="38" cy="19" r="4" fill="#ffc24a"/>
+      </svg>
+    </div>
+    <h1>建议收集</h1>
+    <p class="sub">把想法写下来，会被逐条看到</p>
+  </div>
+
+  <div class="card" id="latest-card">
+    <div class="row">
+      <span class="ver" id="latest-version">加载中…</span>
+      <span class="tag">最新</span>
+    </div>
+    <div class="meta" id="latest-meta"></div>
+    <div class="notes" id="latest-notes"></div>
+    <a class="btn" id="latest-download" href="#">下载安装包</a>
+  </div>
+
+  <div class="card">
+    <h2>安装三步</h2>
+    <ol>
+      <li>点上面的按钮下载 APK（文件约 7 MB）。</li>
+      <li>点开下载好的文件，如果提示「禁止安装未知应用」，去设置里给浏览器（或文件管理器）打开这个开关，再回来点一次。</li>
+      <li>打开「建议收集」，用邮箱注册；注册完等管理员（我）在管理页给你勾上项目，就能进去提建议了。</li>
+    </ol>
+    <div class="notes">安卓 8.0 及以上。装过旧版本的直接覆盖安装，数据在服务器上，不会丢。</div>
+  </div>
+
+  <div class="card">
+    <h2>历史版本</h2>
+    <div class="history" id="history"><div class="empty">加载中…</div></div>
+  </div>
+
+  <footer>自己的服务器提供下载 · <span id="updated"></span></footer>
+</div>
+
+<script>
+  const fmtSize = (b) => (b ? (b / 1048576).toFixed(1) + " MB" : "");
+  const el = (id) => document.getElementById(id);
+
+  fetch("versions.json", { cache: "no-store" })
+    .then((r) => r.json())
+    .then((data) => {
+      const items = (data.items || []).slice().sort((a, b) =>
+        a.version.localeCompare(b.version, undefined, { numeric: true })
+      ).reverse();
+
+      if (!items.length) {
+        el("latest-version").textContent = "还没有安装包";
+        el("latest-download").style.display = "none";
+        el("history").innerHTML = '<div class="empty">还没有安装包</div>';
+        return;
+      }
+
+      const latest = items[0];
+      el("latest-version").textContent = "v" + latest.version;
+      el("latest-meta").textContent = [latest.date, fmtSize(latest.size)]
+        .filter(Boolean).join(" · ");
+      el("latest-notes").textContent = latest.notes || "";
+      el("latest-download").href = latest.file;
+
+      if (items.length > 1) {
+        el("history").innerHTML = items.slice(1).map((it) =>
+          '<a href="' + it.file + '"><span>v' + it.version + '</span>' +
+          '<small>' + [it.date, fmtSize(it.size)].filter(Boolean).join(" · ") +
+          "</small></a>"
+        ).join("");
+      } else {
+        el("history").innerHTML = '<div class="empty">暂时只有这一个版本</div>';
+      }
+      el("updated").textContent = data.updated ? "更新于 " + data.updated : "";
+    })
+    .catch(() => {
+      el("latest-version").textContent = "读取版本信息失败";
+      el("latest-download").style.display = "none";
+      el("history").innerHTML = '<div class="empty">读取版本信息失败，请刷新页面</div>';
+    });
+</script>
+</body>
+</html>
