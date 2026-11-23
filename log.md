@@ -356,5 +356,6 @@
 - 退回统一落到「已接纳」，不能直接退回「待处理」；想重新排队得驳回后再接纳
 - 提交人看不到「这条被退回过」
 
+### 4. 顺手记一条环境坑（github 推送）
 
-
+- 2026-11-23 这次 git push 又报 Recv failure: Connection was reset。本机 DNS 解析到的 github IP 经常不通，解决办法还是那条：用 `curl --resolve github.com:443:<ip> https://github.com` 逐个试，把返回 200 的写进仓库配置 `git config http.curloptResolve "github.com:443:<ip>"`。当天可用的是 `20.205.243.166`（140.82.113.3 / 114.3 / 112.3 都返回 000）。
