@@ -403,3 +403,26 @@
 
 - 只有提交人本人能删，管理员删不掉别人的建议（要删得先驳回）
 - 删除是真删，不留在「已解决」里，也没有回收站
+
+## v0.0.7 — 2026-11-23
+
+用户一条：管理台「已解决」后面的数字被截成了「…」。
+
+### 1. 页签从 TabRow 换成等宽分段控件
+
+- 原因：Material3 的 `TabRow` 四个页签等分宽度，每个约 90dp，`labelLarge`(14sp) 的「已解决 12」加上 Tab 默认左右 padding 会溢出，于是被 `TextOverflow.Ellipsis` 截成「…」
+- 改法：删掉 `TabRow`/`Tab`/`TabLabel`，新写 `AdminTabs(tab, labels, onSelect)`（`ui/AdminScreens.kt`）
+  - `Row` + 圆角底 `Color(0xFFEDEFF7)`，每个页签 `Modifier.weight(1f)` 等分，选中项白底 + `Brand` 字 + `SemiBold`，未选中 `InkSoft`
+  - 文字 `fontSize = 13.sp`、`maxLines = 1`、`softWrap = false`，不再用省略号：宽度够放「已解决 999」
+  - 和登录页的分段控件（登录/注册）视觉统一
+- `versionCode = 7`、`versionName = "0.0.7"`
+
+### 验证
+
+- `assembleDebug` + `assembleRelease` 通过；`aapt2 dump badging` 确认 `versionCode=7`、`versionName=0.0.7`；`dist/suggestion-collection-0.0.7.apk`（7,173,773 B，SHA-256 `DE9B82A8…`）
+- 已通过 `deploy\upload.ps1` 传到服务器，下载页 `<http://39.96.113.178:8080/>` 显示 v0.0.7
+- 页签实际效果要靠管理员账号看（本机连不上 Supabase，没法登进去截图），用户装完瞄一眼即可
+
+### 已知限制
+
+- 只有装饰变化，没有改任何数据逻辑，数据库不用重跑

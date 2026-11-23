@@ -43,8 +43,6 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
-import androidx.compose.material3.Tab
-import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -64,6 +62,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.gaiding.suggestion.Account
 import com.gaiding.suggestion.data.AdminBundle
 import com.gaiding.suggestion.data.AdminSuggestion
@@ -179,32 +178,16 @@ fun AdminHome(
                 .fillMaxSize()
                 .padding(padding),
         ) {
-            TabRow(
-                selectedTabIndex = tab,
-                containerColor = AppBg,
-                contentColor = Brand,
-            ) {
-                Tab(
-                    selected = tab == 0,
-                    onClick = { tab = 0 },
-                    text = { TabLabel("新反馈 ${fresh.size}") },
-                )
-                Tab(
-                    selected = tab == 1,
-                    onClick = { tab = 1 },
-                    text = { TabLabel("待办 ${doing.size}") },
-                )
-                Tab(
-                    selected = tab == 2,
-                    onClick = { tab = 2 },
-                    text = { TabLabel("已解决 ${done.size}") },
-                )
-                Tab(
-                    selected = tab == 3,
-                    onClick = { tab = 3 },
-                    text = { TabLabel("管理") },
-                )
-            }
+            AdminTabs(
+                tab = tab,
+                labels = listOf(
+                    "新反馈 ${fresh.size}",
+                    "待办 ${doing.size}",
+                    "已解决 ${done.size}",
+                    "管理",
+                ),
+                onSelect = { tab = it },
+            )
 
             Box(
                 Modifier
@@ -390,14 +373,39 @@ private fun AdminList(
     }
 }
 
+/** 四个页签：用等宽分段控件，字数再多也不会被截成「…」 */
 @Composable
-private fun TabLabel(text: String) {
-    Text(
-        text = text,
-        style = MaterialTheme.typography.labelLarge,
-        maxLines = 1,
-        overflow = TextOverflow.Ellipsis,
-    )
+private fun AdminTabs(tab: Int, labels: List<String>, onSelect: (Int) -> Unit) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 14.dp, vertical = 10.dp)
+            .clip(RoundedCornerShape(13.dp))
+            .background(Color(0xFFEDEFF7))
+            .padding(3.dp),
+    ) {
+        labels.forEachIndexed { index, label ->
+            val selected = tab == index
+            Box(
+                Modifier
+                    .weight(1f)
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(if (selected) Color.White else Color.Transparent)
+                    .clickable { onSelect(index) }
+                    .padding(vertical = 9.dp, horizontal = 2.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    text = label,
+                    fontSize = 13.sp,
+                    maxLines = 1,
+                    softWrap = false,
+                    color = if (selected) Brand else InkSoft,
+                    fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+                )
+            }
+        }
+    }
 }
 
 @Composable
