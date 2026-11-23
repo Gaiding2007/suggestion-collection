@@ -102,13 +102,13 @@
 6. 给用户的交付说明里写清：装哪个 APK、这版改了什么、数据库要不要补 SQL
 7. 想让同学直接下载的话，再跑一次 `powershell -ExecutionPolicy Bypass -File deploy\upload.ps1`（会更新 `deploy/site/versions.json` 后推上去）
 
-## 9. Supabase 关键信息
+## 9. Supabase（0.0.7 及以前用，0.0.8 起已弃用）
 
-- Project URL：`https://pnnyujqkkdehfxnmomww.supabase.co`（写在 `data/Supa.kt` 的 `BASE`）
-- publishable key：写在 `data/Supa.kt` 的 `API_KEY`（这种 key 设计上就是公开给客户端的，真正保护靠 RLS）
+- Project URL：`https://pnnyujqkkdehfxnmomww.supabase.co`，publishable key 曾写在 `data/Supa.kt`
 - 管理员邮箱：`1412759076@qq.com`
-- 数据库结构在 `supabase/schema.sql`，改表结构时同步改这个文件，保证别人能一键重建
-- **坑**：Supabase 默认开着 `Confirm email`，注册后不能直接登录。已在 README 里写明要去 Authentication → Providers → Email 关掉
+- 表结构归档在 `supabase/schema.sql`（RLS 方案，新后端不用它，只当历史参考）
+- **0.0.8 已把数据全部搬到自己服务器**，确认无误后这个 Supabase 项目可以整个删掉（用户已同意「用完直接删」）
+- 坑（留档）：默认开着 `Confirm email`，注册后不能直接登录；本机网络连不上 `*.supabase.co`（TLS 被重置），所以当时所有验证都只能编译 + 模拟器启动
 
 ## 10. 自己的服务器（阿里云 ECS）
 
@@ -118,8 +118,15 @@
   - 服务器上的文件：`index.html`、`versions.json`、`apk/*.apk`（都是 `deploy/` 里那套，靠 `deploy\upload.ps1` 上传）
   - 配置：`/etc/nginx/sites-available/suggestion`（软链到 `sites-enabled/`），日志 `/var/log/nginx/suggestion.access.log`
   - 安全组只放开了 22 与 8080；**不要**对公网开 5432 / 3000
-- **B 计划（后端搬到这台机器）还没做**：打算用 PostgreSQL（只听 127.0.0.1）+ 自写 Node 接口（只依赖 `pg`，密码用 crypto scrypt、令牌用自己签的 HMAC）+ nginx `/api/` 反代；表沿用现有四张表，权限从 RLS 挪到接口层；App 侧要换 `Supa.BASE`/`Auth` 并允许 http 明文
+- **B 计划（后端搬到这台机器）已完成（2026-11-23，0.0.8）**：
+  - 组件：PostgreSQL 18.6（只听 `127.0.0.1:5432`，库/用户都叫 `suggestion`）+ 自写 Node 22 接口（`/opt/suggestion-api/server.js`，只依赖 `pg`；密码 scrypt 加盐、令牌 HMAC-SHA256 自签，access 12 小时 / refresh 60 天）+ nginx `location /api/` 反代 3000
+  - 服务：systemd `suggestion-api`（`Restart=always`），环境变量在 `/etc/suggestion-api.env`（600），连库串另存 `/root/.suggestion-db.env`（600）
+  - 表：`users / projects / project_access / suggestions`（无 RLS，权限全在接口层；`users.password_hash`、`users.claimed` 用来标记「从 Supabase 搬来但还没认领」的账号）
+  - 接口：`/auth/register|login|refresh`、`/me`、`/home`、`/projects`(POST/DELETE)、`/projects/:id/access`(PUT)、`/suggestions`(POST)、`/suggestions/:id`(PATCH/DELETE)、`/suggestions/:id/{accept|reject|resolve|push|reopen}`
+  - 数据搬迁：服务器上 `curl` 得到 Supabase（那边能连通）→ `deploy/migrate-dump.sh` 导出 JSON 到 `/root/migration` → `deploy/server/import.js` 灌库；结果 3 账号（1 管理员）/ 4 项目 / 6 授权 / 31 条建议，`claimed` 全为 false
+  - App 侧改动：`Supa.BASE = "http://39.96.113.178:8080/api"`（去掉 apikey）、`Auth` 换 `/auth/*`、`Repo` 换新端点、Manifest 加 `android:usesCleartextTraffic="true"`
 - 每次发新版：`deploy\upload.ps1` 会把 `dist` 里的 APK 和下载页一起推上去并 curl 自检
+- **传命令的坑**：PowerShell 5.1 会剥掉远端命令里的双引号、把反引号当命令替换、把 `\$VAR` 吃掉。稳的做法是把脚本写成本地文件 → `scp` → `bash /path/x.sh`；一次性命令用 PS 单引号包整体、内部只用单引号给 bash。写 env 文件别用 PS 的 `printf "...\n"`（`\n` 会变成一个字母 `n`，曾把库名写成 `suggestionn`）
 
 ## 11. 现在的待办 / 以后可能要做
 
@@ -140,7 +147,10 @@
 - [ ] 驳回后提交人「申诉」或管理员写补充说明
 - [ ] 反馈详情页（现在长内容会截到 6 行，点进去看全文）
 - [x] 服务器放安装包下载页（A 计划，2026-11-23：`http://39.96.113.178:8080/`）
-- [ ] 后端从 Supabase 搬到自己的服务器（B 计划）
+- [x] 后端从 Supabase 搬到自己的服务器（B 计划，2026-11-23，0.0.8 起生效）
+- [ ] 老账号认领后，如果忘了新密码只能靠管理员在库里改（还没有找回密码）
+- [ ] 以后有域名 + 证书就把 8080/http 换成 443/https（现在明文，同 wifi 下有被抓包的风险）
+- [ ] 数据库定时备份（`pg_dump` + 传到对象存储，现在还没有）
 
 ---
 
@@ -426,3 +436,58 @@
 ### 已知限制
 
 - 只有装饰变化，没有改任何数据逻辑，数据库不用重跑
+
+## v0.0.8 — 2026-11-23
+
+一次大搬家：后端从 Supabase 免费云搬到自己买的阿里云 ECS 上（用户要求「AB 都做，带我一步步做」），
+历史数据一条不丢，账号体系换成自己签发的 token。
+
+### 1. 服务器侧（`deploy/server/`）
+
+- `schema.sql`：`users / projects / project_access / suggestions` 四张表，没有 RLS，权限全在接口层
+  - `users`：`email`（唯一，`lower(email)` 索引）、`password_hash`（`scrypt$salt$hash`，salt 16 字节 hex、hash 64 字节 hex）、`display_name`、`is_admin`、`claimed`、`created_at`
+  - 其余三张表和旧 Supabase 版字段一致，`suggestions` 保留五种状态和各个时间戳，`project_id` / `author_id` 都是 `on delete cascade`
+- `server.js`：Node 22 原生 `http`，只依赖 `pg`
+  - 鉴权：HMAC-SHA256 自签 token（payload `{uid,typ,exp}`），access 12 小时、refresh 60 天；`/auth/refresh` 要求把 refresh token 当 Bearer
+  - 首个注册的用户自动成为管理员（库里为空时）；同邮箱若 `claimed = false`，注册就是「认领」——设新密码、保留原 id，历史建议不用改
+  - `/home`：管理员拿全量（项目/成员/建议/授权），普通用户只拿自己有权进入的项目和建议
+  - 状态流转和旧版一致：`accept / reject(理由≤400) / resolve / push(版本号≤30、说明≤200) / reopen`；`PATCH` 和 `DELETE` 只允许作者、且只在 `pending`
+- `import.js`：把一个目录里的 4 个 JSON 灌进库，认领状态统一写 `claimed = false`；作者/项目缺失时跳过并打印
+- `deploy-server.sh`：装 Node、装依赖、建表、写 env、装 systemd、自检，可重复执行
+
+### 2. App 侧
+
+- `data/Supa.kt`：`BASE = "http://39.96.113.178:8080/api"`，去掉了 Supabase 的 `apikey`；`friendly()` 改成兜我们自己服务端的中文报错 + 网络异常
+- `data/Auth.kt`：`/auth/login`、`/auth/register`、`/auth/refresh`；退出不再需要通知服务端（token 自校验，不入库）
+- `data/Repo.kt`：全部换成新端点，`projects()/suggestionCounts()/suggestionsOfProject()/adminBundle()` 统一从 `/home` 一次拿完再在本地分组
+- `AndroidManifest.xml`：加 `android:usesCleartextTraffic="true"`（服务器没备案、没证书，只能走明文 http）
+- `versionCode = 8`、`versionName = "0.0.8"`
+
+### 3. 数据搬迁
+
+- Supabase 从服务器上能连通（本机连不上），所以 `deploy/migrate-dump.sh` 在服务器上跑，secret key 走环境变量（**没有写进仓库**）
+- 导出结果：`profiles=3 projects=4 project_access=6 suggestions=31`；`import.js` 导入 `users:3 projects:4 access:6 suggestions:31 skipped:[]`
+- 导入后 3 个账号都是 `claimed = false`，需要在 App 里用原邮箱「注册」一次设新密码
+
+### 4. 验证（这次是真的端到端，不是只看编译）
+
+- 服务器：`curl http://127.0.0.1:3000/api/health` → `{"ok":true}`；`systemctl is-active suggestion-api` → active
+- 公网：`/api/health` 200；注册/登录/`/me`/`/home` 全通；假账号登录返回 401 `{"error":"邮箱或密码不对"}`
+- 接口层把状态机跑了一遍：建项目 → 提建议 → 接纳 → 解决 → 推送 9.9.9 → 退回 → 驳回（带理由）→ 删项目（建议跟着 cascade 删掉），每一步的状态都对
+- 模拟器 emulator-5554 装 0.0.8：登录临时测试管理员后，管理台显示「新反馈 0 / 待办 3 / 已解决 28 / 管理」，四个页签数字完整不截断；「已解决」里 28 条真实历史建议都在，每条都有「退回待办」；「管理」页 4 个项目（1/6/12/12 条建议）和 3 个成员权限也都在
+- 截图：`dist/admin-home-0.0.8.png`、`dist/admin-manage-0.0.8.png`
+- 验证完把临时的 `test-admin@example.com` 和之前误建的 `smoke-test@example.com` 从库里删掉，库里只剩 3 个真实账号
+
+### 5. 已知限制
+
+- 明文 http：同一 wifi 下懂行的人能抓到 token；没有域名/证书之前就这样
+- 没有找回密码：忘了新密码只能由管理员在库里重置
+- 密码哈希和 token 都自写自签，没有做「主动吊销」（改密码后旧 token 到 12 小时才失效）
+- 数据库没有定时备份，目前靠手动 `pg_dump`
+
+### 用户要做的
+
+1. 手机上装 0.0.8（覆盖安装即可，会提示「应用未安装」时才需要先卸载）
+2. **点「注册」，用 `1412759076@qq.com` + 新密码**认领管理员账号（历史建议还在名下）
+3. 其他两个老账号（aaa@qq.com、hby8848666@163.com）同样各自「注册」一次设新密码
+4. 确认新后端用着没问题后，去 Supabase 后台把整个项目删掉

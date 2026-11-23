@@ -2,6 +2,13 @@
     "updated":  "2026-11-23",
     "items":  [
                   {
+                      "version":  "0.0.8",
+                      "file":  "apk/suggestion-collection-0.0.8.apk",
+                      "size":  7173785,
+                      "date":  "2026-11-23",
+                      "notes":  "后端从 Supabase 搬到自己的服务器（39.96.113.178），历史数据（3 个账号 / 4 个项目 / 31 条建议）全部搬好了。老账号第一次要先点「注册」，用原来的邮箱设一个新密码，历史建议还在名下"
+                  },
+                  {
                       "version":  "0.0.7",
                       "file":  "apk/suggestion-collection-0.0.7.apk",
                       "size":  7173773,

@@ -5,7 +5,11 @@ import kotlinx.coroutines.sync.withLock
 import org.json.JSONObject
 
 /**
- * Supabase Auth（GoTrue）封装：注册、登录、静默续期、退出。
+ * 账号相关的接口封装：注册、登录、静默续期、退出。
+ *
+ * 后端是自己服务器上的 /api/auth 系列接口（见 deploy/server/server.js），
+ * 登录成功返回 access_token（12 小时）+ refresh_token（60 天），
+ * 两个都是服务端用 HMAC 自己签的。
  */
 object Auth {
     /** 续期彻底失败时回调，用来把用户踢回登录页。 */
@@ -15,23 +19,22 @@ object Auth {
 
     suspend fun signIn(email: String, password: String) {
         val body = JSONObject().put("email", email.trim()).put("password", password)
-        val text = Supa.raw("POST", "/auth/v1/token?grant_type=password", body)
+        val text = Supa.raw("POST", "/auth/login", body)
         persist(Supa.obj(text))
     }
 
     /**
-     * @return true 表示注册后已直接登录；false 表示账号已创建但需要邮箱验证。
+     * 注册。后端会直接把会话返回，所以注册完就是登录状态。
+     *
+     * 搬过来的老账号第一次「注册」同一个邮箱时会被认领：设上新密码，历史建议还在。
+     *
+     * @return 恒为 true（保留旧签名，界面那边用来判断要不要提示去邮箱验证）
      */
     suspend fun signUp(email: String, password: String): Boolean {
         val body = JSONObject().put("email", email.trim()).put("password", password)
-        val text = Supa.raw("POST", "/auth/v1/signup", body)
-        val obj = Supa.obj(text)
-        return if (obj.optString("access_token").isNotBlank()) {
-            persist(obj)
-            true
-        } else {
-            false
-        }
+        val text = Supa.raw("POST", "/auth/register", body)
+        persist(Supa.obj(text))
+        return true
     }
 
     private fun persist(obj: JSONObject) {
@@ -41,7 +44,7 @@ object Auth {
         SessionStore.save(
             access = access,
             refresh = refresh,
-            expiresInSeconds = obj.optLong("expires_in", 3600L),
+            expiresInSeconds = obj.optLong("expires_in", 43_200L),
             uid = user?.optString("id").orEmpty(),
             mail = user?.optString("email").orEmpty(),
         )
@@ -56,13 +59,13 @@ object Auth {
         val refresh = SessionStore.refreshToken
         if (refresh.isNullOrBlank()) throw Supa.ApiException(401, "登录已失效，请重新登录")
         try {
-            val body = JSONObject().put("refresh_token", refresh)
-            val text = Supa.raw("POST", "/auth/v1/token?grant_type=refresh_token", body)
+            // 续期接口要求用 refresh token 当 Bearer，请求体是空的
+            val text = Supa.raw("POST", "/auth/refresh", JSONObject(), refresh)
             val obj = Supa.obj(text)
             SessionStore.updateTokens(
                 access = obj.getString("access_token"),
                 refresh = obj.getString("refresh_token"),
-                expiresInSeconds = obj.optLong("expires_in", 3600L),
+                expiresInSeconds = obj.optLong("expires_in", 43_200L),
             )
             SessionStore.accessToken!!
         } catch (e: Supa.ApiException) {
@@ -75,23 +78,16 @@ object Auth {
     /**
      * 退出当前账号。
      *
-     * @param keepAccounts true = 只退出登录态，账号留在登录页的账号列表里，点一下就能直接回来
-     *                     （不通知服务端登出，否则 refresh token 会被吊销，快速切换就失效了）；
-     *                     false = 本地 token 一起删掉，并尽力通知服务端登出。
+     * @param keepAccounts true = 只退出登录态，账号留在登录页的账号列表里，点一下就能直接回来；
+     *                     false = 本地 token 一起删掉。
+     *
+     * 服务端是无状态的（token 自校验、不入库），所以这里没有「通知服务端登出」这一步。
      */
     suspend fun signOut(keepAccounts: Boolean = true) {
         if (keepAccounts) {
             SessionStore.leaveCurrent()
             return
         }
-        val token = SessionStore.accessToken ?: SessionStore.refreshToken
         SessionStore.clear()
-        if (token != null) {
-            try {
-                Supa.raw("POST", "/auth/v1/logout", JSONObject(), token)
-            } catch (_: Exception) {
-                // 本地已经清掉了，服务端登出失败不影响使用
-            }
-        }
     }
 }

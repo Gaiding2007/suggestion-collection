@@ -1,0 +1,13 @@
+{
+  "name": "suggestion-api",
+  "version": "0.0.8",
+  "private": true,
+  "description": "建议收集 App 的后端接口（跑在自己的阿里云服务器上）",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "pg": "^8.13.1"
+  }
+}

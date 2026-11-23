@@ -1,9 +1,9 @@
 # 建议收集 / suggestion-collection
 
 一个自己用的安卓 App：把想法和建议收集起来，由管理员逐条接纳、驳回、标记解决、跟着版本推送。
-一台手机做管理端，其他人的手机做提交端，数据放在 Supabase 免费云端共享。
+一台手机做管理端，其他人的手机做提交端，数据放在自己的阿里云服务器上共享。
 
-当前版本：**v0.0.7**（可以发给同学装了，下载页 http://39.96.113.178:8080/）
+当前版本：**v0.0.8**（可以发给同学装了，下载页 http://39.96.113.178:8080/）
 
 ---
 
@@ -50,11 +50,12 @@
 | --- | --- |
 | 客户端 | Kotlin + Jetpack Compose（Material 3），单 Activity |
 | 最低系统 | Android 8.0（API 26） |
-| 后端 | Supabase 免费版（Postgres + Auth + PostgREST） |
-| 网络 | 只用系统自带 `HttpURLConnection` + `org.json`，无第三方网络库 |
+| 服务器 | 阿里云 ECS 2 核 2 G（Ubuntu 26.04），nginx 1.28 监听 8080 |
+| 后端 | PostgreSQL 18 + 自己写的 Node 22 接口（`deploy/server/`，只依赖 `pg`） |
+| 网络 | 只用系统自带 `HttpURLConnection` + `org.json`，无第三方网络库；走明文 http（服务器没备案、没证书） |
 | 构建 | Gradle 8.14 + AGP 8.13.1 + Kotlin 2.3.0，compileSdk 36 |
 
-不引入 Retrofit / Ktor / Supabase SDK，APK 小、离线构建也稳。
+不引入 Retrofit / Ktor / 任何官方 SDK，APK 小、离线构建也稳。
 
 ---
 
@@ -66,47 +67,56 @@ app/src/main/java/com/gaiding/suggestion/
 ├── AppRoot.kt               登录态路由：启动 → 登录页 / 管理台 / 用户首页
 ├── SuggestionApp.kt         Application，初始化本地会话
 ├── data/
-│   ├── Supa.kt              极简 Supabase HTTP 客户端（含错误中文化）
-│   ├── Auth.kt              注册、登录、access token 自动续期、退出
-│   ├── SessionStore.kt      SharedPreferences 存 token
+│   ├── Supa.kt              极简 HTTP 客户端（BASE = 服务器 /api，含错误中文化）
+│   ├── Auth.kt              注册、登录、token 自动续期、退出
+│   ├── SessionStore.kt      SharedPreferences 多账号 token
 │   ├── Models.kt            Profile / Project / Suggestion / Status
 │   └── Repo.kt              所有数据读写（项目、授权、建议、状态流转）
 └── ui/
     ├── Common.kt            时间格式、状态胶囊、按钮、空状态等公共组件
-    ├── LoginScreen.kt       登录 / 注册
+    ├── LoginScreen.kt       登录 / 注册（含「选择账号进入」）
     ├── UserScreens.kt       普通用户：项目列表 → 项目详情 → 提建议
     ├── AdminScreens.kt      管理员：新反馈 / 待办 / 已解决 / 管理（项目 + 权限）
+    ├── AccountSwitch.kt     顶栏「切换」账号弹窗
     └── theme/Theme.kt       配色和字体
-supabase/schema.sql          数据库结构 + 权限规则（一次性执行）
+deploy/
+├── server/                  自己的后端：schema.sql、server.js、import.js、部署脚本
+├── site/                    下载页 + versions.json
+├── nginx-suggestion.conf    nginx 配置（8080 静态 + /api/ 反代）
+├── upload.ps1               一条命令发新版（传 APK + 更新清单）
+└── migrate-dump.sh          从 Supabase 搬数据用（一次性）
+supabase/schema.sql          0.0.7 及以前的 Supabase 方案（留作归档，新后端不用它）
 log.md                       项目记忆 + 每个版本的改动日志
 ```
 
 ---
 
-## 第一次跑起来：三步
+## 服务器（已经跑起来了，平时只需要三件事）
 
-### 1. 建数据库
+后端在自己的阿里云 ECS 上（`39.96.113.178`，Ubuntu 26.04，nginx 监听 **8080**）：
 
-打开 [Supabase 控制台](https://supabase.com/dashboard/project/pnnyujqkkdehfxnmomww) →
-**SQL Editor** → New query → 把 [`supabase/schema.sql`](supabase/schema.sql) 整段粘贴 → **Run**。
-脚本可以重复执行；**升级到新版本后也重跑一次**（0.0.4 新增了 `update_suggestion` 函数，不跑的话提交人点「修改」会报「数据库还没升级」）。
+| 东西 | 位置 |
+| --- | --- |
+| 下载页 + APK | `/var/www/suggestion/`（`http://39.96.113.178:8080/`） |
+| 接口代码 | `/opt/suggestion-api/`（systemd 服务 `suggestion-api`） |
+| 数据库 | PostgreSQL 18，库/用户都是 `suggestion`，只监听 `127.0.0.1` |
+| 配置 | `/etc/suggestion-api.env`（连库串 + 签名密钥，600 权限） |
+| nginx | `/etc/nginx/sites-available/suggestion`（8080 静态 + `/api/` 反代 3000） |
 
-### 2. 关掉邮箱验证
+日常操作就三条：
 
-**Authentication → Providers → Email**，把 **Confirm email** 关掉并保存。
-（开着的话注册完不能直接登录，还得去邮箱点链接。）
+1. **发新版本**：`dist/` 里放好 APK、`deploy/site/versions.json` 加一行 → `powershell -File deploy\upload.ps1 -OnlyVersion 0.0.x`
+2. **看服务状态**：`systemctl status suggestion-api`、`journalctl -u suggestion-api -n 50`
+3. **改表结构**：改 `deploy/server/schema.sql` 后在服务器上 `psql -f schema.sql`（脚本可重复执行）
 
-### 3. 把自己变成管理员
+> 详细步骤见 [`deploy/README.md`](deploy/README.md)。0.0.7 及以前用的是 Supabase 免费云，
+> 0.0.8 起数据和账号都在自己服务器上，Supabase 那边可以删掉了。
 
-先在手机上用管理员邮箱注册一个账号（先别管它是不是管理员），然后回到 SQL Editor 单独执行：
+### 老账号要认领一次
 
-```sql
-update public.profiles set is_admin = true where email = '你的管理员邮箱';
-```
-
-重新打开 App 就是管理台了。
-
-> 其他人在他们手机装同一个 APK、注册自己的账号，你就能在「管理 → 成员权限」里给他们勾项目。
+0.0.8 之前注册过的账号（包括管理员自己）密码存在 Supabase 里，搬不过来。
+第一次用新版本时：登录页点 **注册** → 填 **原来的邮箱** + 新密码 → 历史上的建议还挂在原来那个账号下。
+认领之后用「登录」就行。
 
 ---
 
@@ -148,22 +158,25 @@ keyPassword=你的密码
 1. 把 `app-release.apk`（或 `dist/` 里的包）通过微信 / QQ / 网盘发给对方
 2. 对方点开安装，系统可能提示「未知来源应用」→ 允许这一个来源安装即可
 3. 对方在 App 里注册自己的账号，然后你在「管理 → 成员权限」里给他勾上能看到/能提建议的项目
-4. 多人同时在用同一个 Supabase 项目，看到的是同一份数据
+4. 多人同时连同一个服务器，看到的是同一份数据
 
 ---
 
 ## 数据安全说明
 
-- 所有读写走 Supabase 的行级安全（RLS）：普通用户只能读自己有权限的项目和建议，不能改状态、不能删除、不能给自己开权限
-- 提建议只能走 `create_suggestion()` 函数，函数里强制 `author_id = 当前登录用户`
-- 管理员身份存在 `profiles.is_admin`，只有管理员自己能在 SQL Editor 里改
-- 客户端里写的是 Supabase 的 publishable key（设计上就是给客户端用的公开 key），真正的保护在 RLS
+- 接口在服务端做权限判断：普通用户只能拿到自己有权进入的项目和建议，改状态、删项目、开权限这些只有管理员能调
+- 登录用 scrypt 加盐哈希存密码，会话是 HMAC-SHA256 自签的 token（12 小时），刷新 token 60 天
+- 提建议时 `author_id` 由服务端填，客户端传不进来
+- PostgreSQL 只监听 `127.0.0.1`，安全组只开 8080、22，数据库端口不对公网开放
+- 明文 http 的代价：同一 wifi 下懂行的人能抓包看到 token，自己小范围用够了；以后有域名 + 证书再换 https
 
 ---
 
 ## 版本
 
 | 版本 | 内容 |
+| --- | --- |
+| 0.0.8 | 后端从 Supabase 搬到自己的服务器（历史 3 账号 / 4 项目 / 31 条建议全部迁好）；老账号点「注册」用原邮箱设新密码即可认领 |
 | --- | --- |
 | 0.0.7 | 管理台四个页签改成等宽分段控件，带数字的标签不会再被截成「…」 |
 | 0.0.6 | 提交人可在被处理前删除自己的建议（确认一次）、普通用户列表改成最新的在上面 |

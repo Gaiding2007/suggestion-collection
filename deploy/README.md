@@ -25,7 +25,7 @@
 | 站点根目录 | `/var/www/suggestion` |
 | 访问日志 | `/var/log/nginx/suggestion.access.log` |
 | 监听端口 | 8080（安全组已放行，22 是 ssh） |
-| 已上传的包 | 0.0.6、0.0.5、0.0.4 |
+| 已上传的包 | 0.0.8、0.0.7、0.0.6、0.0.5、0.0.4 |
 
 服务器上的目录：
 
@@ -34,7 +34,7 @@
 ├── index.html                  下载页（来自 deploy/site/index.html）
 ├── versions.json               版本清单（下载页读这个）
 └── apk/
-    ├── suggestion-collection-0.0.6.apk
+    ├── suggestion-collection-0.0.8.apk
     └── suggestion-collection-0.0.5.apk …
 ```
 
@@ -42,14 +42,28 @@
 - 改了 `deploy/site/versions.json` 之后不用动 nginx，页面会立刻看到新版本
 - 排错：`curl -I http://39.96.113.178:8080/apk/<文件名>.apk` 看是不是 200；再看访问日志有没有请求进来
 
-### B. 把后端从 Supabase 搬到这台机器（后做）
+### B. 把后端从 Supabase 搬到这台机器（✅ 2026-11-23 已上线，App 0.0.8 起用新后端）
 
-目标：账号、项目、建议全部存在自己的 PostgreSQL 里，走 nginx 的 `/api/` 反代，App 换成指向自己的服务器。
+账号、项目、授权、建议全部存在自己的 PostgreSQL 里，App 连 `http://39.96.113.178:8080/api`。
 
-- 组件：PostgreSQL（14+，只监听 127.0.0.1）+ 一个自写的 HTTP 接口服务（Node.js，只依赖 `pg` 一个包）
-- 表结构沿用现在的四张表（profiles / projects / project_access / suggestions），权限从「数据库 RLS」改成「接口层校验」
-- 端口：API 只听 127.0.0.1:3000，由 nginx 把 `http://39.96.113.178:8080/api/*` 转过去；数据库端口**不**对外开放
-- App 侧要改：`Supa.BASE` 换成自己的域名/IP、`Auth` 换成自己的登录接口、AndroidManifest 允许 http 明文（`usesCleartextTraffic`）
+| 项 | 值 |
+| --- | --- |
+| PostgreSQL | 18.6，集群 `18/main`，只监听 `127.0.0.1:5432`；库和用户都叫 `suggestion` |
+| 接口服务 | `/opt/suggestion-api/server.js`（Node 22，只依赖 `pg`） |
+| 服务管理 | `systemctl status suggestion-api` / `journalctl -u suggestion-api -n 50` |
+| 环境变量 | `/etc/suggestion-api.env`（`DATABASE_URL`、`API_SECRET`、`PORT=3000`，600 权限） |
+| 连库串 | `/root/.suggestion-db.env`（600 权限，备份用） |
+| 对外入口 | nginx `location /api/` → `127.0.0.1:3000` |
+| 已迁数据 | 3 个账号（1 个管理员）、4 个项目、6 条授权、31 条建议 |
+
+接口一览（都在 `server.js` 顶部注释里）：`/auth/register|login|refresh`、`/me`、`/home`、
+`/projects`（POST/DELETE）、`/projects/:id/access`、`/suggestions`（POST）、
+`/suggestions/:id`（PATCH/DELETE）、`/suggestions/:id/{accept|reject|resolve|push|reopen}`。
+
+数据搬迁是一次性的，用的 `deploy/migrate-dump.sh`（从 Supabase 拉 JSON，secret key 走环境变量，不写进仓库）
++ `deploy/server/import.js`（灌进本地库）。搬完确认无误后 Supabase 项目可以整个删掉。
+
+> 新增表结构：改 `deploy/server/schema.sql`，`scp` 上去后 `psql -f` 执行（脚本可重复执行）。
 
 ## 登录服务器
 
