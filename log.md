@@ -100,6 +100,7 @@
 4. 把要发的 APK 复制到 `dist/`（已被 gitignore，不提交）
 5. `git add -A && git commit -m "版本描述" && git push`
 6. 给用户的交付说明里写清：装哪个 APK、这版改了什么、数据库要不要补 SQL
+7. 想让同学直接下载的话，再跑一次 `powershell -ExecutionPolicy Bypass -File deploy\upload.ps1`（会更新 `deploy/site/versions.json` 后推上去）
 
 ## 9. Supabase 关键信息
 
@@ -109,7 +110,18 @@
 - 数据库结构在 `supabase/schema.sql`，改表结构时同步改这个文件，保证别人能一键重建
 - **坑**：Supabase 默认开着 `Confirm email`，注册后不能直接登录。已在 README 里写明要去 Authentication → Providers → Email 关掉
 
-## 10. 现在的待办 / 以后可能要做
+## 10. 自己的服务器（阿里云 ECS）
+
+- 实例 `iZ2zeg4t2pzrtumjxq41i5Z`，华北2（北京），Ubuntu 26.04 LTS，2 核 2 GB，40 GB 系统盘，1 Mbps 按流量计费，公网 `39.96.113.178`，到期 2027-11-23
+- 登录：`ssh -i C:\Users\14127\.ssh\suggestion_ecs root@39.96.113.178`（私钥只在这台电脑；公钥在服务器 `~/.ssh/authorized_keys`）
+- **A 计划（下载页）已上线**：nginx 1.28.3 监听 8080（国内未备案时 80/443 容易被拦），站点根目录 `/var/www/suggestion`，页面 → `http://39.96.113.178:8080/`
+  - 服务器上的文件：`index.html`、`versions.json`、`apk/*.apk`（都是 `deploy/` 里那套，靠 `deploy\upload.ps1` 上传）
+  - 配置：`/etc/nginx/sites-available/suggestion`（软链到 `sites-enabled/`），日志 `/var/log/nginx/suggestion.access.log`
+  - 安全组只放开了 22 与 8080；**不要**对公网开 5432 / 3000
+- **B 计划（后端搬到这台机器）还没做**：打算用 PostgreSQL（只听 127.0.0.1）+ 自写 Node 接口（只依赖 `pg`，密码用 crypto scrypt、令牌用自己签的 HMAC）+ nginx `/api/` 反代；表沿用现有四张表，权限从 RLS 挪到接口层；App 侧要换 `Supa.BASE`/`Auth` 并允许 http 明文
+- 每次发新版：`deploy\upload.ps1` 会把 `dist` 里的 APK 和下载页一起推上去并 curl 自检
+
+## 11. 现在的待办 / 以后可能要做
 
 - [ ] 找回密码（发重置邮件）
 - [ ] 推送后给提交人发通知（本地或 FCM）
@@ -127,6 +139,8 @@
 - [x] 标题/内容/理由长按可复制（0.0.4）
 - [ ] 驳回后提交人「申诉」或管理员写补充说明
 - [ ] 反馈详情页（现在长内容会截到 6 行，点进去看全文）
+- [x] 服务器放安装包下载页（A 计划，2026-11-23：`http://39.96.113.178:8080/`）
+- [ ] 后端从 Supabase 搬到自己的服务器（B 计划）
 
 ---
 

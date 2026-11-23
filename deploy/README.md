@@ -12,11 +12,22 @@
 
 ## 用它干什么（分两步走）
 
-### A. 放安装包下载页（先做）
+### A. 放安装包下载页（✅ 2026-11-23 已上线）
 
-同学不用加微信、不用收文件，手机浏览器打开 `http://39.96.113.178:8080/` 就能下 APK。
+手机浏览器打开 **http://39.96.113.178:8080/** 就能选版本下载，不用加微信、不用收文件。
 
-- 服务器上的目录：
+服务器上已经装好的东西：
+
+| 项 | 值 |
+| --- | --- |
+| nginx | 1.28.3（Ubuntu 包），`systemctl status nginx` 查看 |
+| 站点配置 | `/etc/nginx/sites-available/suggestion` → 软链到 `sites-enabled/` |
+| 站点根目录 | `/var/www/suggestion` |
+| 访问日志 | `/var/log/nginx/suggestion.access.log` |
+| 监听端口 | 8080（安全组已放行，22 是 ssh） |
+| 已上传的包 | 0.0.6、0.0.5、0.0.4 |
+
+服务器上的目录：
 
 ```
 /var/www/suggestion/
@@ -27,9 +38,9 @@
     └── suggestion-collection-0.0.5.apk …
 ```
 
-- nginx 配置：`/etc/nginx/sites-available/suggestion`（软链到 `sites-enabled/`），内容就是仓库里的 `deploy/nginx-suggestion.conf`
-- 监听端口：**8080**（不用 80 端口的原因：国内服务器没备案时 80/443 容易被拦，8080 这种高位端口不涉及备案）
 - 发布新版：在电脑上跑 `deploy\upload.ps1`，它会把 APK + 下载页一起推上去，然后 curl 自检
+- 改了 `deploy/site/versions.json` 之后不用动 nginx，页面会立刻看到新版本
+- 排错：`curl -I http://39.96.113.178:8080/apk/<文件名>.apk` 看是不是 200；再看访问日志有没有请求进来
 
 ### B. 把后端从 Supabase 搬到这台机器（后做）
 
