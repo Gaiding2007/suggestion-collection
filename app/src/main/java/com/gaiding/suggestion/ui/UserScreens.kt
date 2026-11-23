@@ -315,13 +315,18 @@ private fun ProjectDetail(
     var reloadKey by remember { mutableIntStateOf(0) }
     var showNew by remember { mutableStateOf(false) }
     var editing by remember { mutableStateOf<Suggestion?>(null) }
+    var deleteTarget by remember { mutableStateOf<Suggestion?>(null) }
     val snackbar = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
 
     // 三块：还没被处理的、已经接纳在做的、已经推送或驳回结束的
-    val fresh = items.filter { it.status == Status.Pending }
+    // 普通用户这边统一「最新的在最上面」，所以每一块都按提问时间倒序；
+    // 管理员那边保持不变（按提问顺序，最早的在最上面）。
+    val fresh = items.filter { it.status == Status.Pending }.sortedByDescending { it.createdAt }
     val doing = items.filter { it.status == Status.Accepted || it.status == Status.Resolved }
+        .sortedByDescending { it.createdAt }
     val done = items.filter { it.status == Status.Pushed || it.status == Status.Rejected }
+        .sortedByDescending { it.createdAt }
 
     LaunchedEffect(reloadKey) {
         loading = true
@@ -406,6 +411,7 @@ private fun ProjectDetail(
                                 suggestion = suggestion,
                                 canEdit = suggestion.authorId == meUid,
                                 onEdit = { editing = suggestion },
+                                onDelete = { deleteTarget = suggestion },
                             )
                         }
                     }
@@ -452,6 +458,53 @@ private fun ProjectDetail(
             },
         )
     }
+
+    val deleteItem = deleteTarget
+    if (deleteItem != null) {
+        AlertDialog(
+            onDismissRequest = { deleteTarget = null },
+            containerColor = Color.White,
+            title = { Text("删除这条建议？", color = Ink) },
+            text = {
+                Column {
+                    Text(
+                        text = deleteItem.title,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = InkSoft,
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        text = "删掉之后就找不回来了，别人也看不到了。只想改内容的话，点「修改」更合适。",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = InkFaint,
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        deleteTarget = null
+                        scope.launch {
+                            try {
+                                Repo.deleteSuggestion(deleteItem.id)
+                                reloadKey++
+                                snackbar.showSnackbar("已删除")
+                            } catch (e: Exception) {
+                                snackbar.showSnackbar(Supa.friendly(e))
+                            }
+                        }
+                    },
+                ) {
+                    Text("删除", color = WarnRed, fontWeight = FontWeight.SemiBold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { deleteTarget = null }) {
+                    Text("取消", color = InkSoft)
+                }
+            },
+        )
+    }
 }
 
 @Composable
@@ -465,7 +518,12 @@ private fun GroupHeader(text: String) {
 }
 
 @Composable
-fun SuggestionCard(suggestion: Suggestion, canEdit: Boolean = false, onEdit: () -> Unit = {}) {
+fun SuggestionCard(
+    suggestion: Suggestion,
+    canEdit: Boolean = false,
+    onEdit: () -> Unit = {},
+    onDelete: (() -> Unit)? = null,
+) {
     Card(
         shape = RoundedCornerShape(18.dp),
         colors = CardDefaults.cardColors(containerColor = Color.White),
@@ -488,6 +546,18 @@ fun SuggestionCard(suggestion: Suggestion, canEdit: Boolean = false, onEdit: () 
                             .clickable(onClick = onEdit)
                             .padding(horizontal = 8.dp, vertical = 2.dp),
                     )
+                    Spacer(Modifier.width(4.dp))
+                    if (onDelete != null) {
+                        Text(
+                            text = "删除",
+                            style = MaterialTheme.typography.labelLarge,
+                            color = WarnRed,
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(8.dp))
+                                .clickable(onClick = onDelete)
+                                .padding(horizontal = 8.dp, vertical = 2.dp),
+                        )
+                    }
                     Spacer(Modifier.width(8.dp))
                 }
                 Text(

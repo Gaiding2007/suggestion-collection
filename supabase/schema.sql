@@ -1,5 +1,5 @@
 -- ============================================================
--- 建议收集 v0.0.5 数据库结构（Supabase / PostgreSQL）
+-- 建议收集 v0.0.6 数据库结构（Supabase / PostgreSQL）
 --
 -- 用法：
 --   1. 打开 https://supabase.com/dashboard/project/pnnyujqkkdehfxnmomww
@@ -284,7 +284,35 @@ end;
 $$;
 
 
--- ---------- 9. 授权 ----------
+-- ---------- 9. 删掉自己还没被处理的建议 ----------
+-- 和被处理的界线一样：状态还是 pending 才能删。删了就是删了，数据库里查不回来。
+create or replace function public.delete_suggestion(p_id uuid)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  affected int;
+begin
+  if auth.uid() is null then
+    raise exception '请先登录';
+  end if;
+
+  delete from public.suggestions
+   where id = p_id
+     and author_id = auth.uid()
+     and status = 'pending';
+
+  get diagnostics affected = row_count;
+  if affected = 0 then
+    raise exception '只能删除自己提的、还没被处理的建议';
+  end if;
+end;
+$$;
+
+
+-- ---------- 10. 授权 ----------
 grant usage on schema public to anon, authenticated;
 grant select on all tables in schema public to authenticated;
 grant insert, update, delete on all tables in schema public to authenticated;
@@ -293,10 +321,12 @@ revoke all on function public.is_admin() from public;
 revoke all on function public.has_project_access(uuid) from public;
 revoke all on function public.create_suggestion(uuid, text, text) from public;
 revoke all on function public.update_suggestion(uuid, text, text) from public;
+revoke all on function public.delete_suggestion(uuid) from public;
 grant execute on function public.is_admin() to authenticated;
 grant execute on function public.has_project_access(uuid) to authenticated;
 grant execute on function public.create_suggestion(uuid, text, text) to authenticated;
 grant execute on function public.update_suggestion(uuid, text, text) to authenticated;
+grant execute on function public.delete_suggestion(uuid) to authenticated;
 
 
 -- ============================================================

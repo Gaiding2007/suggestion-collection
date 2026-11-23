@@ -359,3 +359,33 @@
 ### 4. 顺手记一条环境坑（github 推送）
 
 - 2026-11-23 这次 git push 又报 Recv failure: Connection was reset。本机 DNS 解析到的 github IP 经常不通，解决办法还是那条：用 `curl --resolve github.com:443:<ip> https://github.com` 逐个试，把返回 200 的写进仓库配置 `git config http.curloptResolve "github.com:443:<ip>"`。当天可用的是 `20.205.243.166`（140.82.113.3 / 114.3 / 112.3 都返回 000）。
+
+## v0.0.6 — 2026-11-23
+
+用户三条：提交人在被处理前能自己删掉建议、普通用户看到列表要「最新的在上面」、以及他在阿里云买了一台服务器（第三条只聊，不进代码）。
+
+### 1. 提交人可以在被处理前删掉自己的建议
+
+- `supabase/schema.sql` 新增 RPC `public.delete_suggestion(p_id uuid)`（`security definer`）：只删 `author_id = auth.uid() and status = 'pending'` 的行，`get diagnostics ... row_count` 为 0 就 `raise exception '只能删除自己提的、还没被处理的建议'`
+  - 没走「给 suggestions 开作者 DELETE 策略」的老路：RPC 能把「只有 pending 才能删」写死在数据库里，客户端改不了
+- `data/Repo.kt` 新增 `deleteSuggestion(id)`，调 `/rest/v1/rpc/delete_suggestion`
+- `ui/UserScreens.kt`
+  - `SuggestionCard` 多收一个 `onDelete: (() -> Unit)?`，和「修改」并排显示红色的「删除」（只有「新反馈」里自己的建议才出现）
+  - `ProjectDetail` 加 `deleteTarget`，弹出 `AlertDialog`：标题「删除这条建议？」，正文明写「删掉之后就找不回来了，别人也看不到了。只想改内容的话，点「修改」更合适。」——只确认一次，不用输入标题
+  - 删成功 `snackbar.showSnackbar("已删除")` 并刷新列表；失败走 `Supa.friendly(e)`
+
+### 2. 普通用户的列表改成时间逆序
+
+- `ProjectDetail` 的三段（新反馈 / 待办 / 已解决）都加了 `sortedByDescending { it.createdAt }`，最新的在最上面
+- 管理台保持原样（按提问顺序，最早的在最上面）——这是 0.0.1 就定下的需求，两边现在有意不同
+
+### 验证
+
+- `assembleDebug` + `assembleRelease` 通过；`aapt2 dump badging` 确认 `versionCode=6`、`versionName=0.0.6`
+- 本机依旧连不上 `*.supabase.co`，「删除」按钮要有真实账号 + pending 建议才能点，这版靠编译 + 代码走查
+- **用户侧要做的**：SQL Editor 里把 `supabase/schema.sql` 完整重跑一遍（这次新增 `delete_suggestion`；不跑的话点「删除」会提示「数据库还没升级」）
+
+### 已知限制
+
+- 只有提交人本人能删，管理员删不掉别人的建议（要删得先驳回）
+- 删除是真删，不留在「已解决」里，也没有回收站

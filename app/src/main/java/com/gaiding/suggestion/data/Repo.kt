@@ -153,6 +153,12 @@ object Repo {
         authed("POST", "/rest/v1/rpc/update_suggestion", body, prefer = "return=minimal")
     }
 
+    /** 提交人删掉自己还没被处理的建议（数据库里只允许删 status = 'pending' 的自己的建议）。 */
+    suspend fun deleteSuggestion(id: String) {
+        val body = JSONObject().put("p_id", id)
+        authed("POST", "/rest/v1/rpc/delete_suggestion", body, prefer = "return=minimal")
+    }
+
     suspend fun reject(id: String, reason: String) = patchSuggestion(
         id,
         JSONObject()
