@@ -20,6 +20,35 @@ object Supa {
 
     class ApiException(val status: Int, override val message: String) : Exception(message)
 
+    /**
+     * 把接口返回的英文报错翻成人话。登录页和各个对话框都走这里，
+     * 免得用户看到 "Could not find the function public.update_suggestion..." 这种没法处理的东西。
+     */
+    fun friendly(e: Throwable): String {
+        val raw = (e as? ApiException)?.message ?: e.message.orEmpty()
+        val lower = raw.lowercase()
+        return when {
+            raw.isBlank() -> "网络好像不太行，请重试"
+            "invalid login credentials" in lower -> "邮箱或密码不对"
+            "user already registered" in lower -> "这个邮箱已经注册过了，直接点「登录」"
+            "email not confirmed" in lower -> "邮箱还没验证，请先去邮箱点确认链接"
+            "at least 6 characters" in lower -> "密码太短，至少 6 位"
+            "invalid format" in lower -> "邮箱格式不对"
+            "rate limit" in lower || "security purposes" in lower -> "操作太频繁了，等一会儿再试"
+            "could not find the function" in lower || "pgrst202" in lower ->
+                "数据库还没升级：请到 Supabase 的 SQL Editor 把 supabase/schema.sql 重新执行一次" +
+                    "（新版本加了修改建议用的函数），然后重开这个页面"
+            "could not find the table" in lower || "pgrst205" in lower ->
+                "数据库还没初始化：请到 Supabase 的 SQL Editor 执行 supabase/schema.sql"
+            "permission denied" in lower || "pgrst301" in lower ->
+                "没有权限读写数据，检查一下数据库的安全规则"
+            "violates check constraint" in lower || "23514" in lower ->
+                "内容不符合要求（标题 50 字以内、内容 1000 字以内、驳回理由 400 字以内）"
+            "failed to fetch" in lower || "connect" in lower || "timeout" in lower -> "连不上服务器，检查一下网络"
+            else -> raw
+        }
+    }
+
     suspend fun raw(
         method: String,
         path: String,

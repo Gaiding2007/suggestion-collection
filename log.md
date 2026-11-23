@@ -319,4 +319,42 @@
 - 「已解决」里驳回和已推送混在一起，暂时只能靠状态胶囊区分
 
 
+## v0.0.5 — 2026-11-23
+
+用户反馈两条：「已解决的可以退回到待解决（已接纳）」、「修改有报错」。第二条不是代码写错了，是**数据库没升级**——截图里那句 `Could not find the function public.update_suggestion(...)` 就是 0.0.4 新增的函数还没建。这一版把两件事都处理了：加了退回入口，顺便让这类「数据库没跟上」的报错说人话。
+
+### 1. 「已解决」可以退回「待办」
+
+- `data/Repo.kt` 新增 `reopen(id)`：`status` 改回 `accepted`，同时把 `resolved_at`、`reject_reason`、`rejected_at`、`pushed_version`、`pushed_note`、`pushed_at` 全部清 `null`——退回去就是真的重来一遍，不留「已推送 1.2.0」这种自相矛盾的残迹
+- `ui/AdminScreens.kt` 的卡片：
+  - `rejected`：「改为已接纳」→ 改名「退回待办」，走同一个 `reopen`
+  - `pushed`：新增「退回待办」（0.0.4 里 `pushed` 是终态，现在不是了）
+  - 三个页签共用的 `AdminList` 参数 `onUnreject` 一起改名 `onReopen`，提示语「已退回待办」
+- 状态机因此变成：`pushed` 也能回到 `accepted`，只有数据库里被删除才算彻底结束
+
+### 2. 「修改有报错」= 数据库缺函数，现在会说人话
+
+- 根因：0.0.4 的修改走 RPC `public.update_suggestion`，那是要用户自己在 SQL Editor 重跑 `supabase/schema.sql` 才有的；没跑就会收到 PostgREST 的 `PGRST202`（函数不在 schema cache 里）
+- `data/Supa.kt` 新增 `friendly(e)`：把接口英文报错翻成一句中文+该怎么做，覆盖登录类错误、表不存在、函数不存在、权限不足、CHECK 约束（标题 50 / 内容 1000 / 理由 400）、网络不通
+- `AppRoot.kt` 原来的私有 `friendly()` 改成直接调 `Supa.friendly(e)`；`ui/AdminScreens.kt`、`ui/UserScreens.kt` 里所有 `error = e.message ?: "..."`、`snackbar.showSnackbar(e.message ?: "操作失败")` 之类全部换成 `Supa.friendly(e)`——弹窗里写英文报错的地方基本清干净了
+- 所以现在没跑 SQL 时点「保存修改」，红框会直接写：「数据库还没升级：请到 Supabase 的 SQL Editor 把 supabase/schema.sql 重新执行一次（新版本加了修改建议用的函数），然后重开这个页面」
+
+### 3. 顺手修掉别的「假成功」
+
+- `data/Repo.kt` 的 `patchSuggestion()` 从 `Prefer: return=minimal` 改成 `return=representation`，改到 0 行就抛 403 并提示「数据库没有同意这次修改」——和 0.0.3 修 `deleteProject` 是同一类坑：**RLS 拒绝时 PostgREST 不报错，只是 0 行**，minimal 就什么都看不出来
+- 影响所有管理动作（接纳、驳回、解决、推送、退回）
+
+### 验证
+
+- `assembleDebug`（10,600,183 B）+ `assembleRelease`（7,173,773 B）通过；`aapt2 dump badging` 确认 `versionCode=5`、`versionName=0.0.5`；release 包 SHA-256 `47A18A39DCF912219FA7B30EBDD7E34859C8A4ABC2F7D370737E3292B8A7E4DA`
+- `adb install -r` 成功、启动无崩溃；本机依旧连不上 `*.supabase.co`，「退回待办」按钮要有真实被推送/被驳回的数据才能点到，这一版靠编译 + 代码走查确认
+- **用户侧要做的**：还是那件事——SQL Editor 里把 `supabase/schema.sql` 完整跑一遍（这一次必须跑，否则「修改」还是用不了）
+
+### 已知限制
+
+- 退回会丢掉推送记录（版本号、说明、时间），log 里不会留痕；要留痕得另建一张状态流水表
+- 退回统一落到「已接纳」，不能直接退回「待处理」；想重新排队得驳回后再接纳
+- 提交人看不到「这条被退回过」
+
+
 

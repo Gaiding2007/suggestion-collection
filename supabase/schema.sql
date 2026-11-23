@@ -1,5 +1,5 @@
 -- ============================================================
--- 建议收集 v0.0.4 数据库结构（Supabase / PostgreSQL）
+-- 建议收集 v0.0.5 数据库结构（Supabase / PostgreSQL）
 --
 -- 用法：
 --   1. 打开 https://supabase.com/dashboard/project/pnnyujqkkdehfxnmomww

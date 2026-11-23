@@ -111,7 +111,7 @@ fun AdminHome(
             bundle = Repo.adminBundle()
             error = null
         } catch (e: Exception) {
-            error = e.message ?: "加载失败，请检查网络"
+            error = Supa.friendly(e)
         }
     }
 
@@ -122,7 +122,7 @@ fun AdminHome(
                 reload()
                 snackbar.showSnackbar(okMessage)
             } catch (e: Exception) {
-                snackbar.showSnackbar(e.message ?: "操作失败")
+                snackbar.showSnackbar(Supa.friendly(e))
             }
         }
     }
@@ -230,7 +230,7 @@ fun AdminHome(
                         onPush = { s, version, note ->
                             action("已推送，建议移入已解决") { Repo.push(s.id, version, note) }
                         },
-                        onUnreject = { s -> action("已改成接纳") { Repo.accept(s.id) } },
+                        onReopen = { s -> action("已退回待办") { Repo.reopen(s.id) } },
                     )
                     tab == 1 -> AdminList(
                         rows = doing,
@@ -244,7 +244,7 @@ fun AdminHome(
                         onPush = { s, version, note ->
                             action("已推送，建议移入已解决") { Repo.push(s.id, version, note) }
                         },
-                        onUnreject = { s -> action("已改成接纳") { Repo.accept(s.id) } },
+                        onReopen = { s -> action("已退回待办") { Repo.reopen(s.id) } },
                     )
                     tab == 2 -> AdminList(
                         rows = done,
@@ -258,7 +258,7 @@ fun AdminHome(
                         onPush = { s, version, note ->
                             action("已推送") { Repo.push(s.id, version, note) }
                         },
-                        onUnreject = { s -> action("已改成接纳") { Repo.accept(s.id) } },
+                        onReopen = { s -> action("已退回待办") { Repo.reopen(s.id) } },
                     )
                     else -> ManageTab(
                         bundle = data,
@@ -337,7 +337,7 @@ private fun AdminList(
     onReject: (Suggestion, String) -> Unit,
     onResolve: (Suggestion) -> Unit,
     onPush: (Suggestion, String, String?) -> Unit,
-    onUnreject: (Suggestion) -> Unit,
+    onReopen: (Suggestion) -> Unit,
 ) {
     var rejectTarget by remember { mutableStateOf<AdminSuggestion?>(null) }
     var pushTarget by remember { mutableStateOf<AdminSuggestion?>(null) }
@@ -360,7 +360,7 @@ private fun AdminList(
                 onReject = { rejectTarget = row },
                 onResolve = { onResolve(row.suggestion) },
                 onPush = { pushTarget = row },
-                onUnreject = { onUnreject(row.suggestion) },
+                onReopen = { onReopen(row.suggestion) },
             )
         }
     }
@@ -408,7 +408,7 @@ private fun AdminSuggestionCard(
     onReject: () -> Unit,
     onResolve: () -> Unit,
     onPush: () -> Unit,
-    onUnreject: () -> Unit,
+    onReopen: () -> Unit,
 ) {
     val s = row.suggestion
     Card(
@@ -502,8 +502,8 @@ private fun AdminSuggestionCard(
                         SecondaryButton("改为驳回", onClick = onReject)
                         BrandButton("推送新版本", onClick = onPush)
                     }
-                    Status.Rejected -> SecondaryButton("改为已接纳", onClick = onUnreject)
-                    Status.Pushed -> Unit
+                    Status.Rejected -> SecondaryButton("退回待办", onClick = onReopen)
+                    Status.Pushed -> SecondaryButton("退回待办", onClick = onReopen)
                 }
             }
         }
@@ -670,7 +670,7 @@ private fun ManageTab(
                         showCreate = false
                         notify("项目已创建")
                     } catch (e: Exception) {
-                        notify(e.message ?: "创建失败")
+                        notify(Supa.friendly(e))
                     }
                 }
             },
@@ -688,7 +688,7 @@ private fun ManageTab(
                     try {
                         onToggleAccess(projectId, target.id, granted)
                     } catch (e: Exception) {
-                        notify(e.message ?: "设置失败")
+                        notify(Supa.friendly(e))
                     }
                 }
             },
@@ -708,7 +708,7 @@ private fun ManageTab(
                         deleteTarget = null
                         notify("项目「${toDelete.name}」已删除")
                     } catch (e: Exception) {
-                        notify(e.message ?: "删除失败")
+                        notify(Supa.friendly(e))
                     }
                 }
             },

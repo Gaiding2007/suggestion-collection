@@ -119,7 +119,16 @@ object Repo {
     }
 
     private suspend fun patchSuggestion(id: String, fields: JSONObject) {
-        authed("PATCH", "/rest/v1/suggestions?id=eq.$id", fields, prefer = "return=minimal")
+        // 用 return=representation 要回改过的行：RLS 挡下来时 PostgREST 不报错、只是 0 行，
+        // 那样界面会以为改成功了。0 行就当失败抛出去。
+        val text = authed("PATCH", "/rest/v1/suggestions?id=eq.$id", fields, prefer = "return=representation")
+        if (Supa.arr(text).length() == 0) {
+            throw Supa.ApiException(
+                403,
+                "数据库没有同意这次修改：确认当前账号是管理员，" +
+                    "并且已经在 SQL Editor 里执行过 supabase/schema.sql",
+            )
+        }
     }
 
     private fun now(): String = Instant.now().toString()
@@ -168,6 +177,24 @@ object Repo {
             .put("pushed_version", version.trim())
             .put("pushed_note", note?.trim()?.takeIf { it.isNotBlank() } ?: JSONObject.NULL)
             .put("pushed_at", now())
+            .put("handled_by", SessionStore.userId ?: JSONObject.NULL),
+    )
+
+    /**
+     * 把「已解决」里的建议退回「待办」（= 已接纳）：推送信息、驳回理由、解决时间全部清掉，
+     * 让它回到可以重新处理的状态。已推送给提交人看过的版本号会一并消失，log.md 里有记录。
+     */
+    suspend fun reopen(id: String) = patchSuggestion(
+        id,
+        JSONObject()
+            .put("status", Status.Accepted.wire)
+            .put("accepted_at", now())
+            .put("resolved_at", JSONObject.NULL)
+            .put("reject_reason", JSONObject.NULL)
+            .put("rejected_at", JSONObject.NULL)
+            .put("pushed_version", JSONObject.NULL)
+            .put("pushed_note", JSONObject.NULL)
+            .put("pushed_at", JSONObject.NULL)
             .put("handled_by", SessionStore.userId ?: JSONObject.NULL),
     )
 

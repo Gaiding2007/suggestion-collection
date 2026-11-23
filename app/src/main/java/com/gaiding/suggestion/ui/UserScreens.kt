@@ -72,6 +72,7 @@ import com.gaiding.suggestion.data.Repo
 import com.gaiding.suggestion.data.SavedAccount
 import com.gaiding.suggestion.data.Status
 import com.gaiding.suggestion.data.Suggestion
+import com.gaiding.suggestion.data.Supa
 import com.gaiding.suggestion.ui.theme.AppBg
 import com.gaiding.suggestion.ui.theme.Brand
 import com.gaiding.suggestion.ui.theme.BrandSoft
@@ -109,7 +110,7 @@ fun UserHome(
             projects = Repo.projects()
             counts = Repo.suggestionCounts()
         } catch (e: Exception) {
-            error = e.message ?: "加载失败，请检查网络"
+            error = Supa.friendly(e)
         }
         loading = false
     }
@@ -328,7 +329,7 @@ private fun ProjectDetail(
         try {
             items = Repo.suggestionsOfProject(project.id)
         } catch (e: Exception) {
-            error = e.message ?: "加载失败"
+            error = Supa.friendly(e)
         }
         loading = false
     }
@@ -670,7 +671,7 @@ private fun SuggestionEditorDialog(
                                     }
                                 } catch (e: Exception) {
                                     busy = false
-                                    error = e.message ?: "提交失败，请重试"
+                                    error = Supa.friendly(e)
                                 }
                             }
                         },
