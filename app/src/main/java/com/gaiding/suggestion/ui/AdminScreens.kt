@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -26,6 +27,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Done
 import androidx.compose.material.icons.filled.ExitToApp
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Star
@@ -133,10 +135,14 @@ fun AdminHome(
 
     val data = bundle
     val rows = data?.toRows()?.sortedBy { it.suggestion.createdAt }.orEmpty()
-    val pending = rows.filter { it.suggestion.status != Status.Pushed }
-    val solved = rows
-        .filter { it.suggestion.status == Status.Pushed }
-        .sortedByDescending { it.suggestion.pushedAt ?: 0L }
+    // 新反馈 = 还没表态的；待办 = 已经接纳、还没推送的；已解决 = 推送完的 + 驳回掉的
+    val fresh = rows.filter { it.suggestion.status == Status.Pending }
+    val doing = rows.filter {
+        it.suggestion.status == Status.Accepted || it.suggestion.status == Status.Resolved
+    }
+    val done = rows
+        .filter { it.suggestion.status == Status.Pushed || it.suggestion.status == Status.Rejected }
+        .sortedByDescending { it.suggestion.pushedAt ?: it.suggestion.rejectedAt ?: 0L }
 
     Scaffold(
         containerColor = AppBg,
@@ -181,17 +187,22 @@ fun AdminHome(
                 Tab(
                     selected = tab == 0,
                     onClick = { tab = 0 },
-                    text = { Text("待办 ${pending.size}") },
+                    text = { TabLabel("新反馈 ${fresh.size}") },
                 )
                 Tab(
                     selected = tab == 1,
                     onClick = { tab = 1 },
-                    text = { Text("已解决 ${solved.size}") },
+                    text = { TabLabel("待办 ${doing.size}") },
                 )
                 Tab(
                     selected = tab == 2,
                     onClick = { tab = 2 },
-                    text = { Text("管理") },
+                    text = { TabLabel("已解决 ${done.size}") },
+                )
+                Tab(
+                    selected = tab == 3,
+                    onClick = { tab = 3 },
+                    text = { TabLabel("管理") },
                 )
             }
 
@@ -207,16 +218,48 @@ fun AdminHome(
                         Spacer(Modifier.height(10.dp))
                         SecondaryButton("重新加载", Modifier.fillMaxWidth()) { reloadTick++ }
                     }
-                    tab == 0 -> PendingList(
-                        rows = pending,
+                    tab == 0 -> AdminList(
+                        rows = fresh,
+                        numbered = true,
+                        emptyTitle = "还没有新反馈",
+                        emptyDesc = "有人提建议就会出现在这里，按提问顺序从早到晚排",
+                        emptyIcon = Icons.Default.Star,
                         onAccept = { s -> action("已接纳") { Repo.accept(s.id) } },
                         onReject = { s, reason -> action("已驳回") { Repo.reject(s.id, reason) } },
                         onResolve = { s -> action("已标记为解决") { Repo.resolve(s.id) } },
                         onPush = { s, version, note ->
                             action("已推送，建议移入已解决") { Repo.push(s.id, version, note) }
                         },
+                        onUnreject = { s -> action("已改成接纳") { Repo.accept(s.id) } },
                     )
-                    tab == 1 -> SolvedList(solved)
+                    tab == 1 -> AdminList(
+                        rows = doing,
+                        numbered = false,
+                        emptyTitle = "待办是空的",
+                        emptyDesc = "接纳过的建议会进这里，解决后推送就完成了",
+                        emptyIcon = Icons.Default.Check,
+                        onAccept = { s -> action("已接纳") { Repo.accept(s.id) } },
+                        onReject = { s, reason -> action("已改为驳回") { Repo.reject(s.id, reason) } },
+                        onResolve = { s -> action("已标记为解决") { Repo.resolve(s.id) } },
+                        onPush = { s, version, note ->
+                            action("已推送，建议移入已解决") { Repo.push(s.id, version, note) }
+                        },
+                        onUnreject = { s -> action("已改成接纳") { Repo.accept(s.id) } },
+                    )
+                    tab == 2 -> AdminList(
+                        rows = done,
+                        numbered = false,
+                        emptyTitle = "还没有已解决的反馈",
+                        emptyDesc = "推送过的、以及被驳回的建议都会留在这里",
+                        emptyIcon = Icons.Default.Done,
+                        onAccept = { s -> action("已接纳") { Repo.accept(s.id) } },
+                        onReject = { s, reason -> action("已改为驳回") { Repo.reject(s.id, reason) } },
+                        onResolve = { s -> action("已标记为解决") { Repo.resolve(s.id) } },
+                        onPush = { s, version, note ->
+                            action("已推送") { Repo.push(s.id, version, note) }
+                        },
+                        onUnreject = { s -> action("已改成接纳") { Repo.accept(s.id) } },
+                    )
                     else -> ManageTab(
                         bundle = data,
                         notify = { msg -> scope.launch { snackbar.showSnackbar(msg) } },
@@ -284,22 +327,23 @@ fun AdminHome(
 }
 
 @Composable
-private fun PendingList(
+private fun AdminList(
     rows: List<AdminSuggestion>,
+    numbered: Boolean,
+    emptyTitle: String,
+    emptyDesc: String,
+    emptyIcon: androidx.compose.ui.graphics.vector.ImageVector,
     onAccept: (Suggestion) -> Unit,
     onReject: (Suggestion, String) -> Unit,
     onResolve: (Suggestion) -> Unit,
     onPush: (Suggestion, String, String?) -> Unit,
+    onUnreject: (Suggestion) -> Unit,
 ) {
     var rejectTarget by remember { mutableStateOf<AdminSuggestion?>(null) }
     var pushTarget by remember { mutableStateOf<AdminSuggestion?>(null) }
 
     if (rows.isEmpty()) {
-        EmptyBox(
-            title = "没有待处理的建议",
-            desc = "所有建议都已经推送完了，休息一下",
-            icon = Icons.Default.Check,
-        )
+        EmptyBox(title = emptyTitle, desc = emptyDesc, icon = emptyIcon)
         return
     }
 
@@ -311,11 +355,12 @@ private fun PendingList(
         itemsIndexed(rows, key = { _, row -> row.suggestion.id }) { index, row ->
             AdminSuggestionCard(
                 row = row,
-                index = index + 1,
+                index = if (numbered) index + 1 else null,
                 onAccept = { onAccept(row.suggestion) },
                 onReject = { rejectTarget = row },
                 onResolve = { onResolve(row.suggestion) },
                 onPush = { pushTarget = row },
+                onUnreject = { onUnreject(row.suggestion) },
             )
         }
     }
@@ -346,13 +391,24 @@ private fun PendingList(
 }
 
 @Composable
+private fun TabLabel(text: String) {
+    Text(
+        text = text,
+        style = MaterialTheme.typography.labelLarge,
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
+    )
+}
+
+@Composable
 private fun AdminSuggestionCard(
     row: AdminSuggestion,
-    index: Int,
+    index: Int?,
     onAccept: () -> Unit,
     onReject: () -> Unit,
     onResolve: () -> Unit,
     onPush: () -> Unit,
+    onUnreject: () -> Unit,
 ) {
     val s = row.suggestion
     Card(
@@ -365,12 +421,14 @@ private fun AdminSuggestionCard(
     ) {
         Column(Modifier.padding(16.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    text = "#$index",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = InkFaint,
-                )
-                Spacer(Modifier.width(8.dp))
+                if (index != null) {
+                    Text(
+                        text = "#$index",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = InkFaint,
+                    )
+                    Spacer(Modifier.width(8.dp))
+                }
                 ProjectChip(row.projectName)
                 Spacer(Modifier.weight(1f))
                 Text(
@@ -381,23 +439,26 @@ private fun AdminSuggestionCard(
             }
             Spacer(Modifier.height(9.dp))
             Row(verticalAlignment = Alignment.Top) {
-                Text(
-                    text = s.title,
-                    style = MaterialTheme.typography.titleMedium,
-                    color = Ink,
-                    modifier = Modifier.weight(1f),
-                )
+                SelectionContainer(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = s.title,
+                        style = MaterialTheme.typography.titleMedium,
+                        color = Ink,
+                    )
+                }
                 Spacer(Modifier.width(8.dp))
                 StatusChip(s.status)
             }
             val content = s.content
             if (!content.isNullOrBlank()) {
                 Spacer(Modifier.height(6.dp))
-                Text(
-                    text = content,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = InkSoft,
-                )
+                SelectionContainer {
+                    Text(
+                        text = content,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = InkSoft,
+                    )
+                }
             }
             Spacer(Modifier.height(8.dp))
             Text(
@@ -412,12 +473,14 @@ private fun AdminSuggestionCard(
             }
             if (s.status == Status.Pushed && !s.version.isNullOrBlank()) {
                 Spacer(Modifier.height(8.dp))
-                Text(
-                    text = "已在 ${s.version} 推送",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = DeepPurple,
-                    fontWeight = FontWeight.SemiBold,
-                )
+                SelectionContainer {
+                    Text(
+                        text = "已在 ${s.version} 推送",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = DeepPurple,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                }
             }
 
             Spacer(Modifier.height(12.dp))
@@ -431,94 +494,22 @@ private fun AdminSuggestionCard(
                         SecondaryButton("驳回", onClick = onReject)
                         BrandButton("接纳", onClick = onAccept)
                     }
-                    Status.Accepted -> BrandButton("标记为已解决", onClick = onResolve)
-                    Status.Resolved -> BrandButton("推送新版本", onClick = onPush)
-                    else -> Unit
+                    Status.Accepted -> {
+                        SecondaryButton("改为驳回", onClick = onReject)
+                        BrandButton("标记为已解决", onClick = onResolve)
+                    }
+                    Status.Resolved -> {
+                        SecondaryButton("改为驳回", onClick = onReject)
+                        BrandButton("推送新版本", onClick = onPush)
+                    }
+                    Status.Rejected -> SecondaryButton("改为已接纳", onClick = onUnreject)
+                    Status.Pushed -> Unit
                 }
             }
         }
     }
 }
 
-@Composable
-private fun SolvedList(rows: List<AdminSuggestion>) {
-    if (rows.isEmpty()) {
-        EmptyBox(
-            title = "还没有推送过的建议",
-            desc = "建议解决后填上版本号推送，就会出现在这里",
-            icon = Icons.Default.Star,
-        )
-        return
-    }
-    LazyColumn(
-        modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(start = 18.dp, end = 18.dp, top = 4.dp, bottom = 28.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-        items(rows, key = { it.suggestion.id }) { row ->
-            val s = row.suggestion
-            Card(
-                shape = RoundedCornerShape(18.dp),
-                colors = CardDefaults.cardColors(containerColor = Color.White),
-                elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .border(1.dp, LineSoft, RoundedCornerShape(18.dp)),
-            ) {
-                Column(Modifier.padding(16.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        StatusChip(Status.Pushed)
-                        Spacer(Modifier.width(8.dp))
-                        ProjectChip(row.projectName)
-                        Spacer(Modifier.weight(1f))
-                        Text(
-                            text = "推送于 ${formatTime(s.pushedAt ?: 0L)}",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = InkFaint,
-                        )
-                    }
-                    Spacer(Modifier.height(9.dp))
-                    Text(s.title, style = MaterialTheme.typography.titleMedium, color = Ink)
-                    val content = s.content
-                    if (!content.isNullOrBlank()) {
-                        Spacer(Modifier.height(5.dp))
-                        Text(
-                            text = content,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = InkSoft,
-                            maxLines = 4,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                    }
-                    Spacer(Modifier.height(8.dp))
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(
-                            text = s.version ?: "未填版本",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = InfoCyan,
-                            fontWeight = FontWeight.SemiBold,
-                        )
-                        Spacer(Modifier.width(10.dp))
-                        Text(
-                            text = "来自 ${row.authorLabel}",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = InkFaint,
-                        )
-                    }
-                    val note = s.pushNote
-                    if (!note.isNullOrBlank()) {
-                        Spacer(Modifier.height(6.dp))
-                        Text(
-                            text = "推送说明：$note",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = InkSoft,
-                        )
-                    }
-                }
-            }
-        }
-    }
-}
 
 @Composable
 private fun ManageTab(

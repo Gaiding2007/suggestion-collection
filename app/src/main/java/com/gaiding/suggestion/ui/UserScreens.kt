@@ -3,6 +3,7 @@ package com.gaiding.suggestion.ui
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -18,8 +19,9 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
@@ -116,6 +118,7 @@ fun UserHome(
     if (current != null) {
         ProjectDetail(
             project = current,
+            meUid = account.id,
             onBack = { opened = null },
             onSignOut = onSignOut,
         )
@@ -299,14 +302,25 @@ private fun ProjectCard(project: Project, count: Int, onClick: () -> Unit) {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun ProjectDetail(project: Project, onBack: () -> Unit, onSignOut: () -> Unit) {
+private fun ProjectDetail(
+    project: Project,
+    meUid: String,
+    onBack: () -> Unit,
+    onSignOut: () -> Unit,
+) {
     var items by remember { mutableStateOf(emptyList<Suggestion>()) }
     var loading by remember { mutableStateOf(true) }
     var error by remember { mutableStateOf<String?>(null) }
     var reloadKey by remember { mutableIntStateOf(0) }
     var showNew by remember { mutableStateOf(false) }
+    var editing by remember { mutableStateOf<Suggestion?>(null) }
     val snackbar = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
+
+    // 三块：还没被处理的、已经接纳在做的、已经推送或驳回结束的
+    val fresh = items.filter { it.status == Status.Pending }
+    val doing = items.filter { it.status == Status.Accepted || it.status == Status.Resolved }
+    val done = items.filter { it.status == Status.Pushed || it.status == Status.Rejected }
 
     LaunchedEffect(reloadKey) {
         loading = true
@@ -330,7 +344,7 @@ private fun ProjectDetail(project: Project, onBack: () -> Unit, onSignOut: () ->
                     Column {
                         Text(project.name, style = MaterialTheme.typography.titleLarge, color = Ink)
                         Text(
-                            text = "共 ${items.size} 条建议",
+                            text = "新反馈 ${fresh.size} · 待办 ${doing.size} · 已解决 ${done.size}",
                             style = MaterialTheme.typography.bodySmall,
                             color = InkFaint,
                         )
@@ -383,28 +397,74 @@ private fun ProjectDetail(project: Project, onBack: () -> Unit, onSignOut: () ->
                         icon = Icons.Default.Add,
                     )
                 }
-                else -> items(items, key = { it.id }) { suggestion ->
-                    SuggestionCard(suggestion)
+                else -> {
+                    if (fresh.isNotEmpty()) {
+                        item { GroupHeader("新反馈 ${fresh.size}") }
+                        items(fresh, key = { "f-${it.id}" }) { suggestion ->
+                            SuggestionCard(
+                                suggestion = suggestion,
+                                canEdit = suggestion.authorId == meUid,
+                                onEdit = { editing = suggestion },
+                            )
+                        }
+                    }
+                    if (doing.isNotEmpty()) {
+                        item { GroupHeader("待办 ${doing.size}") }
+                        items(doing, key = { "d-${it.id}" }) { suggestion ->
+                            SuggestionCard(suggestion)
+                        }
+                    }
+                    if (done.isNotEmpty()) {
+                        item { GroupHeader("已解决 ${done.size}") }
+                        items(done, key = { "s-${it.id}" }) { suggestion ->
+                            SuggestionCard(suggestion)
+                        }
+                    }
                 }
             }
         }
     }
 
     if (showNew) {
-        NewSuggestionDialog(
+        SuggestionEditorDialog(
             project = project,
+            editing = null,
             onDismiss = { showNew = false },
-            onSubmitted = {
+            onDone = { message ->
                 showNew = false
                 reloadKey++
-                scope.launch { snackbar.showSnackbar("已提交，管理员会看到") }
+                scope.launch { snackbar.showSnackbar(message) }
+            },
+        )
+    }
+
+    val editTarget = editing
+    if (editTarget != null) {
+        SuggestionEditorDialog(
+            project = project,
+            editing = editTarget,
+            onDismiss = { editing = null },
+            onDone = { message ->
+                editing = null
+                reloadKey++
+                scope.launch { snackbar.showSnackbar(message) }
             },
         )
     }
 }
 
 @Composable
-fun SuggestionCard(suggestion: Suggestion) {
+private fun GroupHeader(text: String) {
+    Text(
+        text = text,
+        style = MaterialTheme.typography.labelLarge,
+        color = InkFaint,
+        modifier = Modifier.padding(top = 6.dp),
+    )
+}
+
+@Composable
+fun SuggestionCard(suggestion: Suggestion, canEdit: Boolean = false, onEdit: () -> Unit = {}) {
     Card(
         shape = RoundedCornerShape(18.dp),
         colors = CardDefaults.cardColors(containerColor = Color.White),
@@ -417,6 +477,18 @@ fun SuggestionCard(suggestion: Suggestion) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 StatusChip(suggestion.status)
                 Spacer(Modifier.weight(1f))
+                if (canEdit) {
+                    Text(
+                        text = "修改",
+                        style = MaterialTheme.typography.labelLarge,
+                        color = Brand,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(8.dp))
+                            .clickable(onClick = onEdit)
+                            .padding(horizontal = 8.dp, vertical = 2.dp),
+                    )
+                    Spacer(Modifier.width(8.dp))
+                }
                 Text(
                     text = formatTime(suggestion.createdAt),
                     style = MaterialTheme.typography.bodySmall,
@@ -424,17 +496,21 @@ fun SuggestionCard(suggestion: Suggestion) {
                 )
             }
             Spacer(Modifier.height(9.dp))
-            Text(suggestion.title, style = MaterialTheme.typography.titleMedium, color = Ink)
+            SelectionContainer {
+                Text(suggestion.title, style = MaterialTheme.typography.titleMedium, color = Ink)
+            }
             val content = suggestion.content
             if (!content.isNullOrBlank()) {
                 Spacer(Modifier.height(5.dp))
-                Text(
-                    text = content,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = InkSoft,
-                    maxLines = 6,
-                    overflow = TextOverflow.Ellipsis,
-                )
+                SelectionContainer {
+                    Text(
+                        text = content,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = InkSoft,
+                        maxLines = 6,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
             }
             if (suggestion.status == Status.Rejected && !suggestion.rejectReason.isNullOrBlank()) {
                 Spacer(Modifier.height(10.dp))
@@ -442,12 +518,14 @@ fun SuggestionCard(suggestion: Suggestion) {
             }
             if (suggestion.status == Status.Pushed && !suggestion.version.isNullOrBlank()) {
                 Spacer(Modifier.height(10.dp))
-                Text(
-                    text = "已在 ${suggestion.version} 推送",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = DeepPurple,
-                    fontWeight = FontWeight.SemiBold,
-                )
+                SelectionContainer {
+                    Text(
+                        text = "已在 ${suggestion.version} 推送",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = DeepPurple,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                }
             }
         }
     }
@@ -470,7 +548,9 @@ fun Surface_ReasonBox(label: String, text: String) {
                 fontWeight = FontWeight.SemiBold,
             )
             Spacer(Modifier.height(3.dp))
-            Text(text, style = MaterialTheme.typography.bodySmall, color = Color(0xFF9B2C2C))
+            SelectionContainer {
+                Text(text, style = MaterialTheme.typography.bodySmall, color = Color(0xFF9B2C2C))
+            }
         }
     }
 }
@@ -489,9 +569,15 @@ fun LoadingBlock() {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun NewSuggestionDialog(project: Project, onDismiss: () -> Unit, onSubmitted: () -> Unit) {
-    var title by remember { mutableStateOf("") }
-    var content by remember { mutableStateOf("") }
+private fun SuggestionEditorDialog(
+    project: Project,
+    editing: Suggestion?,
+    onDismiss: () -> Unit,
+    onDone: (message: String) -> Unit,
+) {
+    val isEdit = editing != null
+    var title by remember { mutableStateOf(editing?.title.orEmpty()) }
+    var content by remember { mutableStateOf(editing?.content.orEmpty()) }
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
@@ -507,9 +593,13 @@ private fun NewSuggestionDialog(project: Project, onDismiss: () -> Unit, onSubmi
                     TopAppBar(
                         title = {
                             Column {
-                                Text("提个建议", style = MaterialTheme.typography.titleLarge, color = Ink)
                                 Text(
-                                    project.name,
+                                    text = if (isEdit) "修改建议" else "提个建议",
+                                    style = MaterialTheme.typography.titleLarge,
+                                    color = Ink,
+                                )
+                                Text(
+                                    if (isEdit) "还没被处理，可以改" else project.name,
                                     style = MaterialTheme.typography.bodySmall,
                                     color = InkFaint,
                                 )
@@ -556,7 +646,7 @@ private fun NewSuggestionDialog(project: Project, onDismiss: () -> Unit, onSubmi
                     InfoBanner(error)
                     Spacer(Modifier.height(18.dp))
                     PrimaryButton(
-                        text = "提交建议",
+                        text = if (isEdit) "保存修改" else "提交建议",
                         loading = busy,
                         enabled = title.trim().isNotEmpty(),
                         modifier = Modifier.fillMaxWidth(),
@@ -565,9 +655,19 @@ private fun NewSuggestionDialog(project: Project, onDismiss: () -> Unit, onSubmi
                             busy = true
                             scope.launch {
                                 try {
-                                    Repo.createSuggestion(project.id, title, content)
-                                    busy = false
-                                    onSubmitted()
+                                    if (isEdit) {
+                                        Repo.updateSuggestion(
+                                            editing!!.id,
+                                            title.trim(),
+                                            content.trim().ifEmpty { null },
+                                        )
+                                        busy = false
+                                        onDone("已保存修改")
+                                    } else {
+                                        Repo.createSuggestion(project.id, title, content)
+                                        busy = false
+                                        onDone("已提交，管理员会看到")
+                                    }
                                 } catch (e: Exception) {
                                     busy = false
                                     error = e.message ?: "提交失败，请重试"

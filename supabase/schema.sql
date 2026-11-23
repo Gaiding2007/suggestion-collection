@@ -1,5 +1,5 @@
 -- ============================================================
--- 建议收集 v0.0.2 数据库结构（Supabase / PostgreSQL）
+-- 建议收集 v0.0.4 数据库结构（Supabase / PostgreSQL）
 --
 -- 用法：
 --   1. 打开 https://supabase.com/dashboard/project/pnnyujqkkdehfxnmomww
@@ -240,7 +240,51 @@ end;
 $$;
 
 
--- ---------- 8. 授权 ----------
+-- ---------- 8. 修改自己还没被处理的建议 ----------
+-- 提交人只能改自己提的、状态还是 pending 的建议，而且只能改标题和内容：
+-- 状态、驳回理由这些字段碰不到，避免用户自己把建议改成「已接纳」。
+create or replace function public.update_suggestion(
+  p_id uuid,
+  p_title text,
+  p_content text default null
+)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  affected int;
+begin
+  if auth.uid() is null then
+    raise exception '请先登录';
+  end if;
+  if p_title is null or char_length(btrim(p_title)) = 0 then
+    raise exception '标题不能为空';
+  end if;
+  if char_length(btrim(p_title)) > 50 then
+    raise exception '标题最多 50 个字';
+  end if;
+  if p_content is not null and char_length(p_content) > 1000 then
+    raise exception '内容最多 1000 个字';
+  end if;
+
+  update public.suggestions
+     set title = btrim(p_title),
+         content = nullif(btrim(coalesce(p_content, '')), '')
+   where id = p_id
+     and author_id = auth.uid()
+     and status = 'pending';
+
+  get diagnostics affected = row_count;
+  if affected = 0 then
+    raise exception '只能修改自己提的、还没被处理的建议';
+  end if;
+end;
+$$;
+
+
+-- ---------- 9. 授权 ----------
 grant usage on schema public to anon, authenticated;
 grant select on all tables in schema public to authenticated;
 grant insert, update, delete on all tables in schema public to authenticated;
@@ -248,9 +292,11 @@ grant insert, update, delete on all tables in schema public to authenticated;
 revoke all on function public.is_admin() from public;
 revoke all on function public.has_project_access(uuid) from public;
 revoke all on function public.create_suggestion(uuid, text, text) from public;
+revoke all on function public.update_suggestion(uuid, text, text) from public;
 grant execute on function public.is_admin() to authenticated;
 grant execute on function public.has_project_access(uuid) to authenticated;
 grant execute on function public.create_suggestion(uuid, text, text) to authenticated;
+grant execute on function public.update_suggestion(uuid, text, text) to authenticated;
 
 
 -- ============================================================

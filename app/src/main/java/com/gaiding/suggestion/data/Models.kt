@@ -63,6 +63,7 @@ data class Suggestion(
     val pushNote: String?,
     val createdAt: Long,
     val acceptedAt: Long?,
+    val rejectedAt: Long?,
     val resolvedAt: Long?,
     val pushedAt: Long?,
 ) {
@@ -79,6 +80,7 @@ data class Suggestion(
             pushNote = o.stringOrNull("pushed_note"),
             createdAt = parseTime(o.stringOrNull("created_at")) ?: 0L,
             acceptedAt = parseTime(o.stringOrNull("accepted_at")),
+            rejectedAt = parseTime(o.stringOrNull("rejected_at")),
             resolvedAt = parseTime(o.stringOrNull("resolved_at")),
             pushedAt = parseTime(o.stringOrNull("pushed_at")),
         )

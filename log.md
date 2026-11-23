@@ -45,9 +45,11 @@
 - 普通用户能看到同一项目里所有人提的建议，但**看不到提交人**；提交人只有管理员看得到
 - 建议表单：标题必填 ≤ 50 字，内容选填 ≤ 1000 字
 - 状态只有五种：待处理 `pending` / 已接纳 `accepted` / 已驳回 `rejected` / 已解决 `resolved` / 已推送 `pushed`
-- 状态流转不可逆：`pending → accepted → resolved → pushed`，或 `pending → rejected`；不做「撤销驳回」「退回」
-- 「已推送」= 完成；「已解决」页 = 所有 `pushed` 的建议
+- 状态流转（0.0.4 起）：`pending → accepted → resolved → pushed`；`pending → rejected`；管理员可以把 `rejected` 改回 `accepted`，也可以把 `accepted` / `resolved` 改成 `rejected`——即「接纳」「驳回」之间可以互相纠正，但推送后就是终态，不再改
+- 驳回的反馈直接算「结束」，和已推送一起放进「已解决」；提交人在被处理之前（`pending`）可以自己改标题和内容
+- 管理台页签（0.0.4 起）：新反馈（`pending`）/ 待办（`accepted` + `resolved`）/ 已解决（`pushed` + `rejected`）/ 管理；普通用户在项目里看到的是同一套三段分组
 - 推送不发系统通知，提交人在自己的项目里刷新就能看到版本号
+- 界面上的标题、内容、驳回理由、推送版本都能长按选中复制（`SelectionContainer`）
 
 ## 5. 第一版做 / 不做（0.0.1 范围，已与用户确认）
 
@@ -120,6 +122,11 @@
 - [x] 记住多个登录过的账号、一键切换（0.0.2，0.0.3 修正了「退出就忘记账号」的问题）
 - [x] 正式签名的 release APK（0.0.2）
 - [x] 顶部栏一键切换账号按钮（0.0.3）
+- [x] 管理台四页签（新反馈 / 待办 / 已解决 / 管理）（0.0.4）
+- [x] 提交人在被处理前可自己改建议；管理员可在接纳/驳回之间改回（0.0.4）
+- [x] 标题/内容/理由长按可复制（0.0.4）
+- [ ] 驳回后提交人「申诉」或管理员写补充说明
+- [ ] 反馈详情页（现在长内容会截到 6 行，点进去看全文）
 
 ---
 
@@ -248,5 +255,68 @@
 
 - 删除项目仍然不可撤销
 - 本机无法联调 Supabase，线上行为要等用户装 0.0.3 后实测
+
+
+## v0.0.4 — 2026-11-23
+
+用户提了 5 条：驳回的要进「已完成」、待办/已解决拆成三个模块、提交人在被处理前能改、管理员能在接纳/驳回之间改回、文字能长按复制。这一版把「建议流转」从单向流水线改成了可纠正的三段式。
+
+### 1. 页签拆成「新反馈 / 待办 / 已解决 / 管理」
+
+- `ui/AdminScreens.kt`：`rows` 拆成三组
+  - `fresh` = `pending`
+  - `doing` = `accepted` + `resolved`
+  - `done` = `pushed` + `rejected`，按 `pushedAt ?: rejectedAt ?: createdAt` 倒序（最新结束的在上面）
+- `TabRow` 从三个变四个，标签用新写的 `TabLabel()`（`labelLarge` + `maxLines = 1` + 省略号，防止「已解决 12」把下标挤歪）
+- 原来的 `PendingList` 泛化成 `AdminList(rows, numbered, emptyTitle, emptyDesc, emptyIcon, onAccept, onReject, onResolve, onPush, onUnreject)`，三个页签共用；只有「新反馈」显示 `#序号`
+- 删掉了不再使用的 `SolvedList`
+- 圆点：`Icons.Default.List` 在 core 图标集里其实存在，但需要 `import androidx.compose.material.icons.filled.List`，为了让语义更清楚改用 `Star`（新反馈）/ `Check`（待办）/ `Done`（已解决）
+
+### 2. 驳回的直接进「已解决」
+
+- 这是第 1 条的直接结果：`done` 包含 `rejected`，所以驳回后卡片立刻从「新反馈」消失、出现在「已解决」
+- 卡片上仍然显示驳回理由（红框），方便以后回看为什么没做
+- 排序用 `rejectedAt`，所以刚驳回的排在最上面
+
+### 3. 管理员可以在「已接纳」和「已驳回」之间改回
+
+- `ui/AdminScreens.kt` 的 `AdminSuggestionCard` 按状态出按钮：
+  - `pending`：驳回 / 接纳
+  - `accepted`：改为驳回 / 标记为已解决
+  - `resolved`：改为驳回 / 推送新版本
+  - `rejected`：改为已接纳
+  - `pushed`：没有操作（终态）
+- `data/Repo.kt` 的 `accept()` 顺手把 `reject_reason`、`rejected_at` 清成 `null`——否则「驳回→接纳」之后卡片上会残留一条驳回理由
+- 状态机因此变成：`pending → accepted ⇄ rejected`，`accepted → resolved → pushed`，`resolved → rejected` 也允许（推之前反悔）。推送后的 `pushed` 仍是终态
+
+### 4. 提交人在被处理前可以自己改
+
+- `supabase/schema.sql` 新增 RPC `public.update_suggestion(p_id uuid, p_title text, p_content text default null)`（`security definer`）
+  - 只允许 `author_id = auth.uid()` 且 `status = 'pending'`；用 `get diagnostics ... row_count` 判断，改到 0 行就 `raise exception '只能修改自己提的、还没被处理的建议'`
+  - 这样既不用给 `suggestions` 开 UPDATE 策略（那是管理员专用），也不怕客户端乱改状态字段
+- `data/Repo.kt` 新增 `updateSuggestion(id, title, content)`，调 `/rest/v1/rpc/update_suggestion`
+- `ui/UserScreens.kt`
+  - `ProjectDetail` 多收一个 `meUid`，把列表分成「新反馈 / 待办 / 已解决」三段（和后台一致），段头显示条数
+  - `SuggestionCard(suggestion, canEdit, onEdit)`：`canEdit` 时右上角出现「修改」
+  - `NewSuggestionDialog` 改造成 `SuggestionEditorDialog(project, editing, onDismiss, onDone)`——`editing == null` 是新建，否则预填标题/内容、按钮变「保存修改」
+- `Suggestion` 模型新增 `rejectedAt`（`rejected_at`），给「已解决」排序用
+
+### 5. 文字长按可复制
+
+- 用 Compose 的 `SelectionContainer` 包住：管理台卡片的标题、内容、推送版本行；用户端卡片的标题、内容、推送版本行；以及两边共用的 `Surface_ReasonBox` 正文（驳回理由）
+
+### 验证
+
+- `assembleDebug` + `assembleRelease` 通过；`aapt2 dump badging` 确认 `versionCode=4`、`versionName=0.0.4`
+- 模拟器（emulator-5554）`adb install -r` + 启动正常，登录页页脚显示 `v0.0.4`，无崩溃
+- 仍然连不上 `*.supabase.co`（TLS 被重置），没有真实账号可以点一遍四个页签；这一版的界面改动靠编译 + 代码走查确认
+- **用户侧要做的**：去 SQL Editor 把 `supabase/schema.sql` 再跑一次（新增了 `update_suggestion` 函数；不跑的话提交人点「修改」会报函数不存在）
+
+### 已知限制
+
+- 只做了长按复制，没有做「一键复制」按钮
+- 提交人只能改标题和内容，不能撤销建议、不能改自己选的项目
+- 「已解决」里驳回和已推送混在一起，暂时只能靠状态胶囊区分
+
 
 

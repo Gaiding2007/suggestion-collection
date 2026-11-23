@@ -129,8 +129,20 @@ object Repo {
         JSONObject()
             .put("status", Status.Accepted.wire)
             .put("accepted_at", now())
+            // 从「已驳回」改成「已接纳」时，把旧的驳回痕迹擦掉，免得界面自相矛盾
+            .put("reject_reason", JSONObject.NULL)
+            .put("rejected_at", JSONObject.NULL)
             .put("handled_by", SessionStore.userId ?: JSONObject.NULL),
     )
+
+    /** 提交人改自己还没被处理的建议（数据库里只能改标题和内容，见 update_suggestion 函数）。 */
+    suspend fun updateSuggestion(id: String, title: String, content: String?) {
+        val body = JSONObject()
+            .put("p_id", id)
+            .put("p_title", title.trim())
+            .put("p_content", content?.trim()?.takeIf { it.isNotBlank() } ?: JSONObject.NULL)
+        authed("POST", "/rest/v1/rpc/update_suggestion", body, prefer = "return=minimal")
+    }
 
     suspend fun reject(id: String, reason: String) = patchSuggestion(
         id,
