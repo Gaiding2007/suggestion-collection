@@ -50,6 +50,9 @@
 - 管理台页签（0.0.4 起）：新反馈（`pending`）/ 待办（`accepted` + `resolved`）/ 已解决（`pushed` + `rejected`）/ 管理；普通用户在项目里看到的是同一套三段分组
 - 推送不发系统通知，提交人在自己的项目里刷新就能看到版本号
 - 界面上的标题、内容、驳回理由、推送版本都能长按选中复制（`SelectionContainer`）
+- （0.0.9 起）自己提的建议在状态胶囊后面多一个 **「我的反馈」** 小标签，普通用户和管理员都能看到（管理员本来就知道是谁提的，这个标签主要是给提交人自己认）
+- （0.0.9 起）建议可以带图片：最多 3 张，只收 JPG / PNG，单张 5 MB 以内；App 先压到长边 1200 px、JPEG 82 再传，服务器存 `/var/www/suggestion/uploads/<24 位 hex>.jpg|png`，数据库 `suggestions.images` 只存 `uploads/...` 相对路径
+- （0.0.9 起）图片跟着建议走：删建议会把图一起删；改建议时把某张删掉，文件也会被清掉
 
 ## 5. 第一版做 / 不做（0.0.1 范围，已与用户确认）
 
@@ -91,6 +94,10 @@
   ```
   （`http.curloptResolve` 要 curl 的 `host:port:ip` 格式；换机器或 IP 失效时换一个上面的 IP 试试，`curl --resolve github.com:443:<ip> https://github.com` 能先验证这个 IP 通不通）
 - **Supabase 域名本机也连不上**：`pnnyujqkkdehfxnmomww.supabase.co` 的 TLS 握手会被重置（`Recv failure: Connection was reset`），而 `supabase.com` 能开。所以「数据库有没有建好、RLS 对不对」只能由用户在自己那边确认，本机只保证编译和本地逻辑
+- **连服务器必须带私钥**（0.0.9 踩过）：`ssh root@39.96.113.178` 会一直卡着等密码（本机没配默认私钥）。正确写法是 `ssh -i "$env:USERPROFILE\.ssh\suggestion_ecs" root@39.96.113.178`，`scp` 同理用 `-i`；`deploy\upload.ps1` 里已经封装好了
+- **远程跑 SQL / Node 不要拼嵌套引号**：PowerShell → ssh → bash → psql 四层引号一定会被剥掉（报 `syntax error near unexpected token '('` 或 `extra command-line argument ... ignored`）。稳定做法：本地写 `.sh`（`#!/usr/bin/env bash`）→ `scp` 上去 → `ssh 'bash /root/upload/x.sh'`，脚本里再用 `psql "$DATABASE_URL" -c "..."`；`sed -i 's/\r$//'` 去掉 CRLF 和 BOM
+- **服务器上的 Node 脚本要带 `NODE_PATH`**：`pg` 装在 `/opt/suggestion-api/node_modules`，把脚本放 `/root/upload/` 跑会 `Cannot find module 'pg'`。用 `cd /opt/suggestion-api && NODE_PATH=/opt/suggestion-api/node_modules node /root/upload/x.js`
+- **adb 自动化要点（0.0.9 补）**：一次 `adb shell "..."` 里串起多条命令（`am start; sleep; input tap; ...; screencap`）最可靠，主机端分次调用期间前台很容易被别的 App 抢走；填表单必须「点框 → input text → keyevent 4 收键盘 → 重新截图定位」，键盘弹出会让下半屏整体上移；`adb shell screencap -p /sdcard/x.png` 会被相册索引，选图时记得先 `rm -f /sdcard/*.png`，测试图往 `/sdcard/Pictures/` 放
 
 ## 8. 发布流程（每个版本都这么做）
 
@@ -491,3 +498,62 @@
 2. **点「注册」，用 `1412759076@qq.com` + 新密码**认领管理员账号（历史建议还在名下）
 3. 其他两个老账号（aaa@qq.com、hby8848666@163.com）同样各自「注册」一次设新密码
 4. 确认新后端用着没问题后，去 Supabase 后台把整个项目删掉
+
+## v0.0.9 — 2026-11-24
+
+用户提了两件事：**自己提的建议要能一眼认出来**、**提建议时能传图片**。
+
+### 1. 服务器（`deploy/server/`）
+
+- `schema.sql` 末尾加一列（可重复执行，不动老数据）：
+  `alter table suggestions add column if not exists images jsonb not null default '[]'::jsonb;`
+- `server.js` 新增：
+  - `POST /api/upload`（必须登录）——body 是 `{data: "<base64>"}`，允许带 `data:image/...;base64,` 前缀；按文件头判断真实类型（`ffd8` = jpg、`89504e47` = png），其它一律拒；单张上限 5 MB；文件名 `crypto.randomBytes(12).toString('hex')`；写到 `/var/www/suggestion/uploads/`；返回 `{path, size}`（`path` 就是 `uploads/xxx.jpg`）
+  - 建建议 / 改建议都收 `images` 数组：最多 3 张、必须是 `uploads/<24位hex>.jpg|png`、自动去重；`images` 传 `null` 或干脆不传 = 不动原来的图
+  - 删建议、删项目（cascade 之前先把图路径查出来）会顺手把图片文件删掉
+  - `readBody` 支持每条路由自己的上限：`/api/upload` 8 MB，其它还是 256 KB
+- 部署到服务器：`scp` 三个文件到 `/root/upload/` → 复制进 `/opt/suggestion-api/` → `npm install --omit=dev` → `mkdir -p /var/www/suggestion/uploads` → `psql -f schema.sql`（结果 `images | jsonb | NO`，表里 40 行没动）→ `systemctl restart suggestion-api`
+
+### 2. App 侧
+
+- `data/Supa.kt`：`SITE = "http://39.96.113.178:8080"`、`imageUrl(path)`、`imageBytes(path)`
+- `data/Models.kt`：`Suggestion` 加 `images: List<String>`
+- `data/Repo.kt`：`createSuggestion(..., images)`、`updateSuggestion(..., images)`、`uploadImage(bytes)`
+- `ui/Common.kt`：`MineChip()` —— 状态胶囊后面那个「我的反馈」小标签
+- 新文件 `ui/ImageBits.kt`：
+  - `ImageStore`：内存里缓存已下载的图（最多 24 张），列表滚动不会反复下载
+  - `prepareImageBytes()`：解析尺寸算采样率 → 解码 → 按 EXIF 转正 → 长边压到 1200 px → JPEG 82
+  - `RemoteImage` / `ImageStrip`（88 dp 方形缩略图，最多一排 3 个）/ `ImageViewer`（全屏深色看图，点一下关）/ `EditableImageTile`（编辑器里带 ✕ 的小格子）/ `AddImageButton`
+- `ui/UserScreens.kt`：卡片在状态胶囊后加「我的反馈」（只在自己提的上面显示）；卡片底部显示缩略图，点开看大图；提建议 / 修改的编辑器加「图片（选填，最多 3 张）」，选图后立刻压缩上传，传完显示缩略图，可以点 ✕ 去掉
+- `ui/AdminScreens.kt`：建议卡片在「来自 xxx」下面显示缩略图，同样可以点开看大图
+- `versionCode = 9`、`versionName = "0.0.9"`
+
+### 3. 验证
+
+- 接口层（服务器上跑 Node 脚本，用临时管理员账号）：登录 → 传一张 179 B 的 PNG 得到 `uploads/48b1fc4467681f4682047037.png` → `GET /uploads/...` 返回 200 `image/png` → 带图建建议 → `/home` 读回来图还在 → 传 4 张被拒「一条建议最多 3 张图」→ 删建议后图片地址变 404（文件确实删了）
+- 模拟器（装的是 debug 包，普通用户 + 临时管理员各走一遍）：
+  - 登录页版本号 `v0.0.9`；普通用户「我的项目」只显示被授权的项目
+  - 提建议编辑器出现「图片（选填，最多 3 张）」+「+ 加图片 0/3」，点开是系统相册；选一张后显示缩略图和 `1/3`，格子是正方形、✕ 在右上角
+  - 提交后卡片：`待处理` + **`我的反馈`** + `修改` / `删除` + 88 dp 缩略图；点缩略图弹出全屏看图
+  - 切到管理员「管理台」→「新反馈」：卡片带 `#序号` + 项目名 + `来自 user-test` + 缩略图 + `驳回` / `接纳`
+- 截图：`dist/user-card-0.0.9.png`、`dist/editor-image-0.0.9.png`、`dist/viewer-0.0.9.png`、`dist/admin-card-0.0.9.png`
+- 收尾：删掉临时账号 `img-test@example.com`、`user-test@example.com` 和它们的测试建议，uploads 里的孤立图片也清掉了；库里剩 4 个真实账号、40 条建议
+
+### 4. 踩坑
+
+- `EditableImageTile` 第一版把 `IconButton` 塞进 22 dp 的盒子，结果缩略图被压成 90×60 真实像素、✕ 也偏了。改成 `Box(Modifier.size(88.dp))` + `RemoteImage(Modifier.matchParentSize())` + 一个 20 dp 圆形 `clickable` 的 `Text("×")` 就正常了
+- 模拟器验证被别的 App 抢前台 + 软键盘遮挡，来来回回折腾很久，经验已写进第 7 节
+- 临时账号/测试数据的清理脚本要带 `NODE_PATH`（见第 7 节），否则 `require('pg')` 找不到
+
+### 5. 已知限制
+
+- 图片是静态公开目录：**知道文件名的人不登录也能访问**。文件名是 24 位随机 hex，猜不到，但严格说不是「鉴权后才能看」；以后要更严可以改成 `/api/image/:id` 走服务端校验
+- 没有做图片总量上限和清理策略，用久了要看看 `/var/www/suggestion/uploads/` 占多大
+- 仍是明文 http（和 0.0.8 一样）
+
+### 用户要做的
+
+1. 手机上装 0.0.9（覆盖安装即可）
+2. 数据库这一列**我已经在服务器上跑过了**，不用你动手
+3. 打开随便一条建议，试试传图、点开大图、看看「我的反馈」标签对不对
+

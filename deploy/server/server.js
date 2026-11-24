@@ -10,6 +10,8 @@
 
 const http = require('http');
 const crypto = require('crypto');
+const fs = require('fs');
+const path = require('path');
 const { Pool } = require('pg');
 
 const PORT = Number(process.env.PORT || 3000);
@@ -17,6 +19,12 @@ const DATABASE_URL = process.env.DATABASE_URL;
 const SECRET = process.env.API_SECRET || '';
 const ACCESS_TTL = 12 * 60 * 60;
 const REFRESH_TTL = 60 * 24 * 60 * 60;
+
+// 图片存这儿，nginx 把 /var/www/suggestion 当站点根，所以上传目录是 /uploads/
+const SITE_ROOT = process.env.SITE_ROOT || '/var/www/suggestion';
+const UPLOAD_DIR = path.join(SITE_ROOT, 'uploads');
+const MAX_IMAGES = 3;
+const MAX_IMAGE_BYTES = 5 * 1024 * 1024; // 单张解码后不超过 5 MB
 
 if (!DATABASE_URL) {
   console.error('缺少 DATABASE_URL，退出');
@@ -132,6 +140,7 @@ const suggestionRow = (r) => ({
   rejected_at: r.rejected_at,
   resolved_at: r.resolved_at,
   pushed_at: r.pushed_at,
+  images: Array.isArray(r.images) ? r.images : [],
 });
 
 function sessionOf(user) {
@@ -155,6 +164,60 @@ async function loadSuggestion(id) {
   const r = await q('select * from suggestions where id = $1', [id]);
   if (!r.rowCount) throw notFound('这条建议不存在');
   return r.rows[0];
+}
+
+// ---------------------------------------------------------------- 图片（0.0.9）
+
+const IMAGE_PATH_RE = /^uploads\/[0-9a-f]{24}\.(jpg|png)$/;
+
+function ensureUploadDir() {
+  fs.mkdirSync(UPLOAD_DIR, { recursive: true });
+}
+
+/** 校验并规范化客户端传来的图片路径数组；没传返回 null（表示「这一项不改」） */
+function imageList(value) {
+  if (value === undefined || value === null) return null;
+  if (!Array.isArray(value)) throw bad('图片格式不对');
+  if (value.length > MAX_IMAGES) throw bad(`一条建议最多 ${MAX_IMAGES} 张图`);
+  const out = [];
+  for (const item of value) {
+    const p = String(item || '').trim();
+    if (!IMAGE_PATH_RE.test(p)) throw bad('图片路径不对');
+    if (!out.includes(p)) out.push(p);
+  }
+  return out;
+}
+
+function deleteImageFiles(paths) {
+  for (const p of paths || []) {
+    if (!IMAGE_PATH_RE.test(String(p))) continue;
+    fs.unlink(path.join(SITE_ROOT, String(p)), () => {});
+  }
+}
+
+async function hUpload(req) {
+  const raw = String(req.body.data || '');
+  if (!raw) throw bad('没有收到图片');
+
+  let buf;
+  try {
+    buf = Buffer.from(raw.replace(/^data:image\/[a-z+.-]+;base64,/i, ''), 'base64');
+  } catch {
+    throw bad('图片数据是坏的');
+  }
+  if (!buf.length) throw bad('图片是空的');
+  if (buf.length > MAX_IMAGE_BYTES) throw bad('图片太大了，换一张小一点的');
+
+  // 只认 JPEG / PNG 的文件头，不信任客户端给的后缀
+  let ext = null;
+  if (buf[0] === 0xff && buf[1] === 0xd8) ext = 'jpg';
+  else if (buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4e && buf[3] === 0x47) ext = 'png';
+  if (!ext) throw bad('只支持 JPG 或 PNG 图片');
+
+  ensureUploadDir();
+  const name = crypto.randomBytes(12).toString('hex') + '.' + ext;
+  fs.writeFileSync(path.join(UPLOAD_DIR, name), buf);
+  return { path: 'uploads/' + name, size: buf.length };
 }
 
 // ---------------------------------------------------------------- 接口实现
@@ -268,8 +331,13 @@ async function hCreateProject(req, user) {
 
 async function hDeleteProject(req, user, params) {
   if (!user.is_admin) throw forbidden();
+  // 先把项目里建议带的图片路径记下来，删完库再删文件（否则文件会变成孤儿）
+  const imgs = await q('select images from suggestions where project_id = $1', [params.id]);
   const r = await q('delete from projects where id = $1 returning id', [params.id]);
   if (!r.rowCount) throw notFound('项目不存在，或者数据库没同意删除');
+  for (const row of imgs.rows) {
+    deleteImageFiles(Array.isArray(row.images) ? row.images : []);
+  }
   return { ok: true, id: r.rows[0].id };
 }
 
@@ -300,15 +368,16 @@ async function hCreateSuggestion(req, user) {
   const projectId = String(req.body.project_id || '');
   const title = text(req.body.title, '标题', { min: 1, max: 50 });
   const content = text(req.body.content, '内容', { max: 1000 });
+  const images = imageList(req.body.images) || [];
   if (!user.is_admin && !(await hasAccess(user.id, projectId))) {
     throw forbidden('你还没有这个项目的权限，找管理员开通一下');
   }
   const p = await q('select 1 from projects where id = $1', [projectId]);
   if (!p.rowCount) throw notFound('项目不存在');
   const r = await q(
-    `insert into suggestions (project_id, author_id, title, content)
-     values ($1, $2, $3, $4) returning *`,
-    [projectId, user.id, title, content],
+    `insert into suggestions (project_id, author_id, title, content, images)
+     values ($1, $2, $3, $4, $5::jsonb) returning *`,
+    [projectId, user.id, title, content, JSON.stringify(images)],
   );
   return { suggestion: suggestionRow(r.rows[0]) };
 }
@@ -319,10 +388,16 @@ async function hUpdateSuggestion(req, user, params) {
   if (row.status !== 'pending') throw forbidden('这条已经被处理过了，不能再改');
   const title = text(req.body.title, '标题', { min: 1, max: 50 });
   const content = text(req.body.content, '内容', { max: 1000 });
+  const oldImages = Array.isArray(row.images) ? row.images : [];
+  const images = imageList(req.body.images);
+  const nextImages = images === null ? oldImages : images;
   const r = await q(
-    'update suggestions set title = $1, content = $2 where id = $3 returning *',
-    [title, content, row.id],
+    'update suggestions set title = $1, content = $2, images = $3::jsonb where id = $4 returning *',
+    [title, content, JSON.stringify(nextImages), row.id],
   );
+  if (images !== null) {
+    for (const gone of oldImages.filter((p) => !nextImages.includes(p))) deleteImageFiles([gone]);
+  }
   return { suggestion: suggestionRow(r.rows[0]) };
 }
 
@@ -331,6 +406,7 @@ async function hDeleteSuggestion(req, user, params) {
   if (row.author_id !== user.id) throw forbidden('只能删自己提的建议');
   if (row.status !== 'pending') throw forbidden('这条已经被处理过了，删不了');
   await q('delete from suggestions where id = $1', [row.id]);
+  deleteImageFiles(Array.isArray(row.images) ? row.images : []);
   return { ok: true, id: row.id };
 }
 
@@ -416,6 +492,7 @@ const routes = [
   ['DELETE', /^\/api\/projects\/(?<id>[0-9a-f-]{36})$/, hDeleteProject, { auth: true }],
   ['PUT', /^\/api\/projects\/(?<id>[0-9a-f-]{36})\/access$/, hSetAccess, { auth: true }],
   ['POST', /^\/api\/suggestions$/, hCreateSuggestion, { auth: true }],
+  ['POST', /^\/api\/upload$/, hUpload, { auth: true, maxBody: 8 * 1024 * 1024 }],
   ['PATCH', /^\/api\/suggestions\/(?<id>[0-9a-f-]{36})$/, hUpdateSuggestion, { auth: true }],
   ['DELETE', /^\/api\/suggestions\/(?<id>[0-9a-f-]{36})$/, hDeleteSuggestion, { auth: true }],
   ['POST', /^\/api\/suggestions\/(?<id>[0-9a-f-]{36})\/accept$/, hAccept, { auth: true }],
@@ -425,13 +502,13 @@ const routes = [
   ['POST', /^\/api\/suggestions\/(?<id>[0-9a-f-]{36})\/reopen$/, hReopen, { auth: true }],
 ];
 
-function readBody(req) {
+function readBody(req, maxBytes = 256 * 1024) {
   return new Promise((resolve, reject) => {
     let size = 0;
     const chunks = [];
     req.on('data', (c) => {
       size += c.length;
-      if (size > 256 * 1024) {
+      if (size > maxBytes) {
         reject(bad('请求内容太大了'));
         req.destroy();
         return;
@@ -475,7 +552,10 @@ async function handle(req, res) {
   }
   if (!matched) return send(res, 404, { error: '没有这个接口' });
 
-  req.body = req.method === 'GET' || req.method === 'DELETE' ? {} : await readBody(req);
+  req.body =
+    req.method === 'GET' || req.method === 'DELETE'
+      ? {}
+      : await readBody(req, matched.options.maxBody || 256 * 1024);
 
   let user = null;
   if (matched.options.auth) {

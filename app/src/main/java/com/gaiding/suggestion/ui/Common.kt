@@ -75,6 +75,20 @@ fun StatusChip(status: Status, modifier: Modifier = Modifier) {
     }
 }
 
+/** 「我的反馈」标识：跟在状态胶囊后面，一眼看出哪几条是自己提的。 */
+@Composable
+fun MineChip(modifier: Modifier = Modifier) {
+    Surface(color = BrandSoft, shape = RoundedCornerShape(50), modifier = modifier) {
+        Text(
+            text = "我的反馈",
+            color = Brand,
+            style = MaterialTheme.typography.labelSmall,
+            fontWeight = FontWeight.SemiBold,
+            modifier = Modifier.padding(horizontal = 9.dp, vertical = 4.dp),
+        )
+    }
+}
+
 @Composable
 fun Avatar(text: String, modifier: Modifier = Modifier, size: Int = 40) {
     Box(

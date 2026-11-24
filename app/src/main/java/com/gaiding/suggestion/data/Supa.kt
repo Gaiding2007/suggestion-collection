@@ -21,6 +21,9 @@ import java.net.URL
 object Supa {
     const val BASE = "http://39.96.113.178:8080/api"
 
+    /** 静态文件（建议里带的图片）在站点根目录下，不在 /api 里。 */
+    const val SITE = "http://39.96.113.178:8080"
+
     class ApiException(val status: Int, override val message: String) : Exception(message)
 
     /**
@@ -90,4 +93,24 @@ object Supa {
 
     fun obj(text: String): JSONObject = if (text.isBlank()) JSONObject() else JSONObject(text)
     fun arr(text: String): JSONArray = if (text.isBlank()) JSONArray() else JSONArray(text)
+
+    /** 把 "uploads/xxxx.jpg" 变成能直接下载的完整地址。 */
+    fun imageUrl(path: String): String =
+        if (path.startsWith("http://") || path.startsWith("https://")) path else "$SITE/$path"
+
+    /** 下载一张图（不上鉴权，图片走 nginx 静态目录，路径本身就是随机名）。 */
+    suspend fun imageBytes(path: String): ByteArray = withContext(Dispatchers.IO) {
+        val conn = (URL(imageUrl(path)).openConnection() as HttpURLConnection).apply {
+            requestMethod = "GET"
+            connectTimeout = 15_000
+            readTimeout = 30_000
+        }
+        try {
+            val code = conn.responseCode
+            if (code !in 200..299) throw ApiException(code, "图片没加载出来（$code）")
+            conn.inputStream.use { it.readBytes() }
+        } finally {
+            conn.disconnect()
+        }
+    }
 }

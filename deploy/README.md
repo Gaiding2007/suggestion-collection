@@ -25,7 +25,7 @@
 | 站点根目录 | `/var/www/suggestion` |
 | 访问日志 | `/var/log/nginx/suggestion.access.log` |
 | 监听端口 | 8080（安全组已放行，22 是 ssh） |
-| 已上传的包 | 0.0.8、0.0.7、0.0.6、0.0.5、0.0.4 |
+| 已上传的包 | 0.0.9、0.0.8、0.0.7、0.0.6、0.0.5、0.0.4 |
 
 服务器上的目录：
 
@@ -33,9 +33,10 @@
 /var/www/suggestion/
 ├── index.html                  下载页（来自 deploy/site/index.html）
 ├── versions.json               版本清单（下载页读这个）
+├── uploads/                    建议配图（0.0.9 起，App 上传后存这里）
 └── apk/
-    ├── suggestion-collection-0.0.8.apk
-    └── suggestion-collection-0.0.5.apk …
+    ├── suggestion-collection-0.0.9.apk
+    └── suggestion-collection-0.0.8.apk …
 ```
 
 - 发布新版：在电脑上跑 `deploy\upload.ps1`，它会把 APK + 下载页一起推上去，然后 curl 自检
@@ -58,7 +59,11 @@
 
 接口一览（都在 `server.js` 顶部注释里）：`/auth/register|login|refresh`、`/me`、`/home`、
 `/projects`（POST/DELETE）、`/projects/:id/access`、`/suggestions`（POST）、
-`/suggestions/:id`（PATCH/DELETE）、`/suggestions/:id/{accept|reject|resolve|push|reopen}`。
+`/suggestions/:id`（PATCH/DELETE）、`/suggestions/:id/{accept|reject|resolve|push|reopen}`、
+`/upload`（POST base64 图片，0.0.9 起）。
+
+> 图片文件的对外地址是 `http://39.96.113.178:8080/uploads/<24位hex>.jpg|png`（nginx 静态目录，
+> 对应服务器上的 `/var/www/suggestion/uploads/`）。`schema.sql` 里的 `suggestions.images` 只存这个相对路径。
 
 数据搬迁是一次性的，用的 `deploy/migrate-dump.sh`（从 Supabase 拉 JSON，secret key 走环境变量，不写进仓库）
 + `deploy/server/import.js`（灌进本地库）。搬完确认无误后 Supabase 项目可以整个删掉。

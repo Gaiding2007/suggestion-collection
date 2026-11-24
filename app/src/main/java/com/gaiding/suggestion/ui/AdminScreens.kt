@@ -419,6 +419,7 @@ private fun AdminSuggestionCard(
     onReopen: () -> Unit,
 ) {
     val s = row.suggestion
+    var adminViewing by remember { mutableStateOf<String?>(null) }
     Card(
         shape = RoundedCornerShape(18.dp),
         colors = CardDefaults.cardColors(containerColor = Color.White),
@@ -475,6 +476,11 @@ private fun AdminSuggestionCard(
                 color = InkFaint,
             )
 
+            if (s.images.isNotEmpty()) {
+                Spacer(Modifier.height(10.dp))
+                ImageStrip(s.images) { adminViewing = it }
+            }
+
             if (s.status == Status.Rejected && !s.rejectReason.isNullOrBlank()) {
                 Spacer(Modifier.height(10.dp))
                 Surface_ReasonBox("驳回理由（已通知提交人）", s.rejectReason!!)
@@ -515,6 +521,11 @@ private fun AdminSuggestionCard(
                 }
             }
         }
+    }
+
+    val viewing = adminViewing
+    if (viewing != null) {
+        ImageViewer(viewing) { adminViewing = null }
     }
 }
 

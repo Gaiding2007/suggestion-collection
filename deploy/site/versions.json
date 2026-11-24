@@ -1,6 +1,13 @@
 {
-    "updated":  "2026-11-23",
+    "updated":  "2026-11-24",
     "items":  [
+                  {
+                      "version":  "0.0.9",
+                      "file":  "apk/suggestion-collection-0.0.9.apk",
+                      "size":  7190169,
+                      "date":  "2026-11-24",
+                      "notes":  "自己提的建议会标「我的反馈」；提建议时可以上传图片（最多 3 张，JPG/PNG），列表里看缩略图、点开看大图，管理员那边也能看到图"
+                  },
                   {
                       "version":  "0.0.8",
                       "file":  "apk/suggestion-collection-0.0.8.apk",

@@ -54,3 +54,7 @@ create table if not exists suggestions (
 create index if not exists suggestions_project_idx on suggestions (project_id, created_at);
 create index if not exists suggestions_author_idx on suggestions (author_id);
 create index if not exists suggestions_status_idx on suggestions (status);
+
+-- 0.0.9：建议可以带图片。存的是相对下载站根目录的路径，例如 ["uploads/ab12cd34.jpg"]
+-- 文件本体放在 /var/www/suggestion/uploads/ 下，由 nginx 直接返回（权限在接口层校验）。
+alter table suggestions add column if not exists images jsonb not null default '[]'::jsonb;

@@ -83,20 +83,43 @@ object Repo {
         if (!ok) throw Supa.ApiException(500, "服务端说没删掉，刷新再看一眼")
     }
 
-    suspend fun createSuggestion(projectId: String, title: String, content: String?) {
+    suspend fun createSuggestion(
+        projectId: String,
+        title: String,
+        content: String?,
+        images: List<String> = emptyList(),
+    ) {
         val body = JSONObject()
             .put("project_id", projectId)
             .put("title", title.trim())
             .put("content", content?.trim()?.takeIf { it.isNotBlank() } ?: JSONObject.NULL)
+            .put("images", JSONArray(images))
         authed("POST", "/suggestions", body)
     }
 
-    /** 提交人改自己还没被处理的建议（服务端校验作者和时间点）。 */
-    suspend fun updateSuggestion(id: String, title: String, content: String?) {
+    /** 提交人改自己还没被处理的建议（服务端校验作者和时间点）。images 传 null 表示不动图片。 */
+    suspend fun updateSuggestion(
+        id: String,
+        title: String,
+        content: String?,
+        images: List<String>? = null,
+    ) {
         val body = JSONObject()
             .put("title", title.trim())
             .put("content", content?.trim()?.takeIf { it.isNotBlank() } ?: JSONObject.NULL)
+        if (images != null) body.put("images", JSONArray(images))
         authed("PATCH", "/suggestions/$id", body)
+    }
+
+    /** 先把图传上去拿到路径，再随建议一起提交。 */
+    suspend fun uploadImage(jpegBytes: ByteArray): String {
+        val body = JSONObject().put(
+            "data",
+            android.util.Base64.encodeToString(jpegBytes, android.util.Base64.NO_WRAP),
+        )
+        val path = Supa.obj(authed("POST", "/upload", body)).optString("path")
+        if (path.isBlank()) throw Supa.ApiException(500, "图片没传上去，请重试")
+        return path
     }
 
     /** 提交人删掉自己还没被处理的建议。 */

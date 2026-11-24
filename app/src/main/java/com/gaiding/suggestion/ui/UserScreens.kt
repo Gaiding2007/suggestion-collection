@@ -1,6 +1,8 @@
 package com.gaiding.suggestion.ui
 
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -61,6 +63,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -83,7 +86,9 @@ import com.gaiding.suggestion.ui.theme.InkSoft
 import com.gaiding.suggestion.ui.theme.LineSoft
 import com.gaiding.suggestion.ui.theme.WarnRed
 import com.gaiding.suggestion.ui.theme.WarnRedBg
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -407,9 +412,11 @@ private fun ProjectDetail(
                     if (fresh.isNotEmpty()) {
                         item { GroupHeader("新反馈 ${fresh.size}") }
                         items(fresh, key = { "f-${it.id}" }) { suggestion ->
+                            val mine = suggestion.authorId == meUid
                             SuggestionCard(
                                 suggestion = suggestion,
-                                canEdit = suggestion.authorId == meUid,
+                                mine = mine,
+                                canEdit = mine,
                                 onEdit = { editing = suggestion },
                                 onDelete = { deleteTarget = suggestion },
                             )
@@ -418,13 +425,13 @@ private fun ProjectDetail(
                     if (doing.isNotEmpty()) {
                         item { GroupHeader("待办 ${doing.size}") }
                         items(doing, key = { "d-${it.id}" }) { suggestion ->
-                            SuggestionCard(suggestion)
+                            SuggestionCard(suggestion, mine = suggestion.authorId == meUid)
                         }
                     }
                     if (done.isNotEmpty()) {
                         item { GroupHeader("已解决 ${done.size}") }
                         items(done, key = { "s-${it.id}" }) { suggestion ->
-                            SuggestionCard(suggestion)
+                            SuggestionCard(suggestion, mine = suggestion.authorId == meUid)
                         }
                     }
                 }
@@ -520,10 +527,12 @@ private fun GroupHeader(text: String) {
 @Composable
 fun SuggestionCard(
     suggestion: Suggestion,
+    mine: Boolean = false,
     canEdit: Boolean = false,
     onEdit: () -> Unit = {},
     onDelete: (() -> Unit)? = null,
 ) {
+    var viewing by remember { mutableStateOf<String?>(null) }
     Card(
         shape = RoundedCornerShape(18.dp),
         colors = CardDefaults.cardColors(containerColor = Color.White),
@@ -535,6 +544,10 @@ fun SuggestionCard(
         Column(Modifier.padding(16.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 StatusChip(suggestion.status)
+                if (mine) {
+                    Spacer(Modifier.width(6.dp))
+                    MineChip()
+                }
                 Spacer(Modifier.weight(1f))
                 if (canEdit) {
                     Text(
@@ -598,7 +611,16 @@ fun SuggestionCard(
                     )
                 }
             }
+            if (suggestion.images.isNotEmpty()) {
+                Spacer(Modifier.height(10.dp))
+                ImageStrip(suggestion.images) { viewing = it }
+            }
         }
+    }
+
+    val viewingPath = viewing
+    if (viewingPath != null) {
+        ImageViewer(viewingPath) { viewing = null }
     }
 }
 
@@ -649,9 +671,28 @@ private fun SuggestionEditorDialog(
     val isEdit = editing != null
     var title by remember { mutableStateOf(editing?.title.orEmpty()) }
     var content by remember { mutableStateOf(editing?.content.orEmpty()) }
+    var images by remember { mutableStateOf(editing?.images.orEmpty()) }
+    var uploading by remember { mutableStateOf(false) }
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
+    val context = LocalContext.current
+
+    val picker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        scope.launch {
+            uploading = true
+            error = null
+            try {
+                val bytes = withContext(Dispatchers.IO) { prepareImageBytes(context, uri) }
+                val path = Repo.uploadImage(bytes)
+                images = images + path
+            } catch (e: Exception) {
+                error = Supa.friendly(e)
+            }
+            uploading = false
+        }
+    }
 
     Dialog(
         onDismissRequest = { if (!busy) onDismiss() },
@@ -713,13 +754,34 @@ private fun SuggestionEditorDialog(
                         supportingText = { Text("${content.length}/1000") },
                         modifier = Modifier.fillMaxWidth(),
                     )
+                    Spacer(Modifier.height(12.dp))
+                    Text(
+                        text = "图片（选填，最多 3 张）",
+                        style = MaterialTheme.typography.labelLarge,
+                        color = InkSoft,
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    if (images.isNotEmpty()) {
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            images.forEach { path ->
+                                EditableImageTile(path) { images = images - path }
+                            }
+                        }
+                        Spacer(Modifier.height(8.dp))
+                    }
+                    AddImageButton(
+                        count = images.size,
+                        limit = 3,
+                        uploading = uploading,
+                        onPick = { picker.launch("image/*") },
+                    )
                     Spacer(Modifier.height(10.dp))
                     InfoBanner(error)
                     Spacer(Modifier.height(18.dp))
                     PrimaryButton(
                         text = if (isEdit) "保存修改" else "提交建议",
                         loading = busy,
-                        enabled = title.trim().isNotEmpty(),
+                        enabled = title.trim().isNotEmpty() && !uploading,
                         modifier = Modifier.fillMaxWidth(),
                         onClick = {
                             error = null
@@ -731,11 +793,12 @@ private fun SuggestionEditorDialog(
                                             editing!!.id,
                                             title.trim(),
                                             content.trim().ifEmpty { null },
+                                            images,
                                         )
                                         busy = false
                                         onDone("已保存修改")
                                     } else {
-                                        Repo.createSuggestion(project.id, title, content)
+                                        Repo.createSuggestion(project.id, title, content, images)
                                         busy = false
                                         onDone("已提交，管理员会看到")
                                     }

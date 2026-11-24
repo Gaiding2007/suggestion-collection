@@ -66,6 +66,7 @@ data class Suggestion(
     val rejectedAt: Long?,
     val resolvedAt: Long?,
     val pushedAt: Long?,
+    val images: List<String> = emptyList(),
 ) {
     companion object {
         fun from(o: JSONObject) = Suggestion(
@@ -83,6 +84,9 @@ data class Suggestion(
             rejectedAt = parseTime(o.stringOrNull("rejected_at")),
             resolvedAt = parseTime(o.stringOrNull("resolved_at")),
             pushedAt = parseTime(o.stringOrNull("pushed_at")),
+            images = o.optJSONArray("images")?.let { arr ->
+                (0 until arr.length()).mapNotNull { i -> arr.optString(i).takeIf { it.isNotBlank() } }
+            } ?: emptyList(),
         )
     }
 }
