@@ -51,14 +51,17 @@ object Repo {
         val raw = home()
         val projects = raw.list("projects").map { Project.from(it) }
         val suggestions = raw.list("suggestions").map { Suggestion.from(it) }
-        val users = raw.list("users").map { Profile.from(it) }
+        // 0.0.10 起服务端把这个列表叫 members（只在本应用内有身份的账号）；
+        // 老版本服务端还叫 users，两边都读一下，免得升级过程中闪一下空列表。
+        val membersRaw = if (raw.has("members")) raw.list("members") else raw.list("users")
+        val users = membersRaw.map { Profile.from(it) }
         val access = raw.list("access")
             .map { "${it.optString("project_id")}|${it.optString("user_id")}" }
             .toSet()
 
-        val labelById = users.associate { it.id to it.label }
+        val byId = users.associate { it.id to it }
         val authors = suggestions.mapNotNull { s ->
-            s.authorId?.let { uid -> s.id to (labelById[uid] ?: "已注销用户") }
+            s.authorId?.let { uid -> s.id to (byId[uid]?.label ?: "已注销用户") }
         }.toMap()
 
         return AdminBundle(
@@ -68,6 +71,12 @@ object Repo {
             users = users,
             access = access,
         )
+    }
+
+    /** 管理员给某个用户写备注（只有管理员能调，普通用户看不到别人的备注）。 */
+    suspend fun setMemberNote(userId: String, note: String?) {
+        val body = JSONObject().put("note", note?.trim()?.takeIf { it.isNotBlank() } ?: JSONObject.NULL)
+        authed("PUT", "/members/$userId/note", body)
     }
 
     suspend fun createProject(name: String, description: String?) {

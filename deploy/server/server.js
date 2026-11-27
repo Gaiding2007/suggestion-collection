@@ -5,7 +5,11 @@
  *
  * 跑在自己的服务器上：只监听 127.0.0.1:3000，外网通过 nginx 的 /api/ 转发进来。
  * 数据库：PostgreSQL（deploy/server/schema.sql），连接串在环境变量 DATABASE_URL。
- * 登录：自己签发的 HMAC token（access 12 小时，refresh 60 天），密码用 scrypt 存。
+ *
+ * 0.0.10 起登录交给公共账号服务（deploy/accounts，端口 3001）：
+ *   - 账号、密码、注册登录都在那边，本服务不再存密码
+ *   - 这里只校验它签发的 token（两边共用 API_SECRET），然后按 UUID 找本应用的成员
+ *   - 成员表 members 只放「本应用里的这个人」：管理员身份、管理员备注
  */
 
 const http = require('http');
@@ -17,8 +21,6 @@ const { Pool } = require('pg');
 const PORT = Number(process.env.PORT || 3000);
 const DATABASE_URL = process.env.DATABASE_URL;
 const SECRET = process.env.API_SECRET || '';
-const ACCESS_TTL = 12 * 60 * 60;
-const REFRESH_TTL = 60 * 24 * 60 * 60;
 
 // 图片存这儿，nginx 把 /var/www/suggestion 当站点根，所以上传目录是 /uploads/
 const SITE_ROOT = process.env.SITE_ROOT || '/var/www/suggestion';
@@ -63,35 +65,6 @@ function text(value, field, { min = 0, max = 100000 } = {}) {
   return s.length ? s : null;
 }
 
-function normEmail(value) {
-  const e = String(value || '').trim().toLowerCase();
-  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(e)) throw bad('邮箱格式不对');
-  return e;
-}
-
-function hashPassword(pw) {
-  const salt = crypto.randomBytes(16).toString('hex');
-  const hash = crypto.scryptSync(pw, salt, 64).toString('hex');
-  return `scrypt$${salt}$${hash}`;
-}
-
-function checkPassword(pw, stored) {
-  if (!stored) return false;
-  const [alg, salt, hash] = stored.split('$');
-  if (alg !== 'scrypt' || !salt || !hash) return false;
-  const calc = crypto.scryptSync(pw, salt, 64);
-  const want = Buffer.from(hash, 'hex');
-  return calc.length === want.length && crypto.timingSafeEqual(calc, want);
-}
-
-function sign(payload, ttl) {
-  const body = Buffer.from(
-    JSON.stringify({ ...payload, exp: Math.floor(Date.now() / 1000) + ttl }),
-  ).toString('base64url');
-  const sig = crypto.createHmac('sha256', SECRET).update(body).digest('base64url');
-  return `${body}.${sig}`;
-}
-
 function verify(token) {
   if (typeof token !== 'string' || !token.includes('.')) return null;
   const [body, sig] = token.split('.');
@@ -110,11 +83,15 @@ function verify(token) {
 
 // ---------------------------------------------------------------- 行映射（保持和旧 Supabase 一样的字段名，App 端少改）
 
-const userRow = (r) => ({
-  id: r.id,
+const memberRow = (r) => ({
+  id: r.user_id,
   email: r.email,
   display_name: r.display_name,
   is_admin: r.is_admin,
+  // 管理员给他写的备注：只有管理员调的管理员接口才会带上，普通接口不返回
+  note: r.note || null,
+  note_updated_at: r.note_updated_at || null,
+  created_at: r.created_at,
 });
 
 const projectRow = (r) => ({
@@ -143,13 +120,43 @@ const suggestionRow = (r) => ({
   images: Array.isArray(r.images) ? r.images : [],
 });
 
-function sessionOf(user) {
-  return {
-    access_token: sign({ uid: user.id, typ: 'access' }, ACCESS_TTL),
-    refresh_token: sign({ uid: user.id, typ: 'refresh' }, REFRESH_TTL),
-    expires_in: ACCESS_TTL,
-    user: userRow(user),
-  };
+/**
+ * 按 token 里的 UUID 找本应用的成员；第一次见到这个人时建一行。
+ * 本应用还没有管理员时，第一个来的人自动成为管理员（新库开局用）。
+ */
+async function ensureMember(claims) {
+  const id = String(claims.sub || claims.uid || '');
+  if (!id) throw unauth();
+  const email = typeof claims.email === 'string' ? claims.email : '';
+  const name = typeof claims.name === 'string' ? claims.name : '';
+
+  const found = await q('select * from members where user_id = $1', [id]);
+  if (found.rowCount) {
+    const m = found.rows[0];
+    if ((email && email !== m.email) || (name && name !== (m.display_name || ''))) {
+      const upd = await q(
+        `update members set
+           email = coalesce(nullif($2, ''), email),
+           display_name = coalesce(nullif($3, ''), display_name),
+           last_seen_at = now()
+         where user_id = $1 returning *`,
+        [id, email, name],
+      );
+      return upd.rows[0];
+    }
+    return m;
+  }
+
+  const admins = await q('select 1 from members where is_admin limit 1');
+  const firstEver = admins.rowCount === 0;
+  const ins = await q(
+    `insert into members (user_id, email, display_name, is_admin, last_seen_at)
+     values ($1, $2, $3, $4, now())
+     on conflict (user_id) do update set email = excluded.email
+     returning *`,
+    [id, email || `${id}@unknown`, name || null, firstEver],
+  );
+  return ins.rows[0];
 }
 
 async function hasAccess(userId, projectId) {
@@ -227,71 +234,24 @@ async function hHealth() {
   return { ok: true };
 }
 
-async function hRegister(req) {
-  const email = normEmail(req.body.email);
-  const pw = String(req.body.password || '');
-  if (pw.length < 6) throw bad('密码至少 6 位，再短容易被猜到');
-
-  const found = await q('select * from users where lower(email) = $1', [email]);
-  let user;
-  if (found.rowCount) {
-    const old = found.rows[0];
-    if (old.claimed && old.password_hash) throw new HttpError(409, '这个邮箱已经注册过了，直接登录就行');
-    // 迁移过来的老账号：认领它，历史建议还挂在同一个 id 上
-    const upd = await q(
-      `update users set password_hash = $1, claimed = true,
-         display_name = coalesce(nullif(display_name, ''), $2)
-       where id = $3 returning *`,
-      [hashPassword(pw), email.split('@')[0], old.id],
-    );
-    user = upd.rows[0];
-  } else {
-    const count = await q('select count(*)::int as n from users');
-    const firstEver = count.rows[0].n === 0;
-    const ins = await q(
-      `insert into users (email, password_hash, display_name, is_admin, claimed)
-       values ($1, $2, $3, $4, true) returning *`,
-      [email, hashPassword(pw), email.split('@')[0], firstEver],
-    );
-    user = ins.rows[0];
-  }
-  return sessionOf(user);
-}
-
-async function hLogin(req) {
-  const email = normEmail(req.body.email);
-  const pw = String(req.body.password || '');
-  const r = await q('select * from users where lower(email) = $1', [email]);
-  if (!r.rowCount) throw unauth('邮箱或密码不对');
-  const user = r.rows[0];
-  if (!user.password_hash) {
-    throw new HttpError(409, '这个账号是搬过来的，还没设新密码：请点「注册」，用同一个邮箱设置一次密码');
-  }
-  if (!checkPassword(pw, user.password_hash)) throw unauth('邮箱或密码不对');
-  return sessionOf(user);
-}
-
-async function hRefresh(req, user) {
-  const r = await q('select * from users where id = $1', [user.id]);
-  if (!r.rowCount) throw unauth();
-  return sessionOf(r.rows[0]);
-}
-
 async function hMe(req, user) {
-  return { user: userRow(user) };
+  return { user: memberRow(user) };
 }
 
 async function hHome(req, user) {
   if (user.is_admin) {
     const [p, u, s, a] = await Promise.all([
       q('select * from projects order by created_at'),
-      q('select * from users where is_admin = false order by created_at'),
+      q('select * from members order by created_at'),
       q('select * from suggestions order by created_at'),
       q('select project_id, user_id from project_access'),
     ]);
+    const members = u.rows.map(memberRow);
     return {
       projects: p.rows.map(projectRow),
-      users: u.rows.map(userRow),
+      members,
+      // 老版本的 App 只认 users 这个字段，先留着当别名，等大家都升级上去再删
+      users: members,
       suggestions: s.rows.map(suggestionRow),
       access: a.rows,
     };
@@ -312,6 +272,7 @@ async function hHome(req, user) {
   ]);
   return {
     projects: p.rows.map(projectRow),
+    members: [],
     users: [],
     suggestions: s.rows.map(suggestionRow),
     access: [],
@@ -348,7 +309,7 @@ async function hSetAccess(req, user, params) {
   const granted = req.body.granted === true;
   const p = await q('select 1 from projects where id = $1', [projectId]);
   if (!p.rowCount) throw notFound('项目不存在');
-  const u = await q('select 1 from users where id = $1', [userId]);
+  const u = await q('select 1 from members where user_id = $1', [userId]);
   if (!u.rowCount) throw notFound('用户不存在');
   if (granted) {
     await q(
@@ -362,6 +323,24 @@ async function hSetAccess(req, user, params) {
     ]);
   }
   return { ok: true, project_id: projectId, user_id: userId, granted };
+}
+
+/**
+ * 管理员给某个用户写备注。备注只在这个接口的返回里出现，
+ * 普通用户的 /home、/me 都不会带别人的备注。
+ */
+async function hSetMemberNote(req, user, params) {
+  if (!user.is_admin) throw forbidden();
+  const note = text(req.body.note, '备注', { max: 300 });
+  const r = await q(
+    `update members set
+       note = $1::text,
+       note_updated_at = case when $1::text is null then null else now() end
+     where user_id = $2 returning *`,
+    [note, params.id],
+  );
+  if (!r.rowCount) throw notFound('这个用户不存在');
+  return { member: memberRow(r.rows[0]) };
 }
 
 async function hCreateSuggestion(req, user) {
@@ -483,11 +462,9 @@ async function hReopen(req, user, params) {
 
 const routes = [
   ['GET', /^\/api\/health$/, hHealth, { auth: false }],
-  ['POST', /^\/api\/auth\/register$/, hRegister, { auth: false }],
-  ['POST', /^\/api\/auth\/login$/, hLogin, { auth: false }],
-  ['POST', /^\/api\/auth\/refresh$/, hRefresh, { auth: true, tokenType: 'refresh' }],
   ['GET', /^\/api\/me$/, hMe, { auth: true }],
   ['GET', /^\/api\/home$/, hHome, { auth: true }],
+  ['PUT', /^\/api\/members\/(?<id>[0-9a-f-]{36})\/note$/, hSetMemberNote, { auth: true }],
   ['POST', /^\/api\/projects$/, hCreateProject, { auth: true }],
   ['DELETE', /^\/api\/projects\/(?<id>[0-9a-f-]{36})$/, hDeleteProject, { auth: true }],
   ['PUT', /^\/api\/projects\/(?<id>[0-9a-f-]{36})\/access$/, hSetAccess, { auth: true }],
@@ -565,9 +542,9 @@ async function handle(req, res) {
     if (!claims) throw unauth();
     const want = matched.options.tokenType || 'access';
     if (claims.typ !== want) throw unauth();
-    const r = await q('select * from users where id = $1', [claims.uid]);
-    if (!r.rowCount) throw unauth();
-    user = r.rows[0];
+    // token 是公共账号服务签的，这里只按 UUID 找本应用的成员（没有就建一行）
+    const member = await ensureMember(claims);
+    user = { ...member, id: member.user_id };
   }
 
   const result = await matched.handler(req, user, matched.params);

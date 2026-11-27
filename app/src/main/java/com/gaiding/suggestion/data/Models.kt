@@ -20,6 +20,8 @@ data class Profile(
     val email: String,
     val displayName: String?,
     val isAdmin: Boolean,
+    /** 管理员给这个人写的备注；只有管理员拿到的数据里才会有，普通用户永远是 null。 */
+    val note: String? = null,
 ) {
     val label: String get() = displayName?.takeIf { it.isNotBlank() } ?: email.substringBefore("@")
 
@@ -29,6 +31,7 @@ data class Profile(
             email = o.optString("email"),
             displayName = o.stringOrNull("display_name"),
             isAdmin = o.optBoolean("is_admin", false),
+            note = o.stringOrNull("note"),
         )
     }
 }
@@ -95,6 +98,8 @@ data class AdminSuggestion(
     val suggestion: Suggestion,
     val projectName: String,
     val authorLabel: String,
+    /** 管理员给提交人写的备注；没有就是 null。只有管理员能看到。 */
+    val authorNote: String? = null,
 )
 
 data class AdminBundle(
@@ -106,11 +111,13 @@ data class AdminBundle(
 ) {
     fun toRows(): List<AdminSuggestion> {
         val projectNames = projects.associate { it.id to it.name }
+        val noteById = users.associate { it.id to it.note }
         return suggestions.map { s ->
             AdminSuggestion(
                 suggestion = s,
                 projectName = projectNames[s.projectId] ?: "未知项目",
                 authorLabel = authors[s.id] ?: "未知",
+                authorNote = s.authorId?.let { noteById[it] },
             )
         }
     }

@@ -1,0 +1,13 @@
+{
+  "name": "accounts-api",
+  "version": "0.0.10",
+  "private": true,
+  "description": "公共账号服务：一套账号给多个 App 共用（建议收集是第一家）",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "pg": "^8.13.1"
+  }
+}

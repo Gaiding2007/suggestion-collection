@@ -25,7 +25,7 @@
 | 站点根目录 | `/var/www/suggestion` |
 | 访问日志 | `/var/log/nginx/suggestion.access.log` |
 | 监听端口 | 8080（安全组已放行，22 是 ssh） |
-| 已上传的包 | 0.0.9、0.0.8、0.0.7、0.0.6、0.0.5、0.0.4 |
+| 已上传的包 | 0.0.10、0.0.9、0.0.8、0.0.7、0.0.6、0.0.5、0.0.4 |
 
 服务器上的目录：
 
@@ -35,6 +35,7 @@
 ├── versions.json               版本清单（下载页读这个）
 ├── uploads/                    建议配图（0.0.9 起，App 上传后存这里）
 └── apk/
+    ├── suggestion-collection-0.0.10.apk
     ├── suggestion-collection-0.0.9.apk
     └── suggestion-collection-0.0.8.apk …
 ```
@@ -55,12 +56,15 @@
 | 环境变量 | `/etc/suggestion-api.env`（`DATABASE_URL`、`API_SECRET`、`PORT=3000`，600 权限） |
 | 连库串 | `/root/.suggestion-db.env`（600 权限，备份用） |
 | 对外入口 | nginx `location /api/` → `127.0.0.1:3000` |
-| 已迁数据 | 3 个账号（1 个管理员）、4 个项目、6 条授权、31 条建议 |
+| 已迁数据 | 7 个账号（1 个管理员）、7 个项目、47 条建议（0.0.10 时点） |
 
-接口一览（都在 `server.js` 顶部注释里）：`/auth/register|login|refresh`、`/me`、`/home`、
-`/projects`（POST/DELETE）、`/projects/:id/access`、`/suggestions`（POST）、
-`/suggestions/:id`（PATCH/DELETE）、`/suggestions/:id/{accept|reject|resolve|push|reopen}`、
-`/upload`（POST base64 图片，0.0.9 起）。
+接口一览（都在 `server.js` 顶部注释里）：`/me`、`/home`、`/projects`（POST/DELETE）、
+`/projects/:id/access`、`/members/:id/note`（PUT，管理员备注，0.0.10 起）、
+`/suggestions`（POST）、`/suggestions/:id`（PATCH/DELETE）、
+`/suggestions/:id/{accept|reject|resolve|push|reopen}`、`/upload`（POST base64 图片，0.0.9 起）。
+
+> 0.0.10 起账号不在这个服务里：登录/注册/续期走**公共账号服务**（见下面 C 段），
+> 这里只认 token，并把 token 里的用户在 `members` 表里对应起来。
 
 > 图片文件的对外地址是 `http://39.96.113.178:8080/uploads/<24位hex>.jpg|png`（nginx 静态目录，
 > 对应服务器上的 `/var/www/suggestion/uploads/`）。`schema.sql` 里的 `suggestions.images` 只存这个相对路径。
@@ -69,6 +73,32 @@
 + `deploy/server/import.js`（灌进本地库）。搬完确认无误后 Supabase 项目可以整个删掉。
 
 > 新增表结构：改 `deploy/server/schema.sql`，`scp` 上去后 `psql -f` 执行（脚本可重复执行）。
+
+### C. 公共账号服务（✅ 2026-11-27 已上线，App 0.0.10 起用）
+
+账号从建议收集里拆出来了，单独一个库 + 单独一个服务；以后别的软件只要填这个地址就能共用同一批账号。
+
+| 项 | 值 |
+| --- | --- |
+| PostgreSQL | 同一个实例，库和用户都叫 `accounts`（和 `suggestion` 完全分开） |
+| 接口服务 | `/opt/accounts-api/server.js`（Node 22，只依赖 `pg`） |
+| 服务管理 | `systemctl status accounts-api` / `journalctl -u accounts-api -n 50` |
+| 环境变量 | `/etc/accounts-api.env`（`DATABASE_URL`、`API_SECRET`、`PORT=3001`，600 权限） |
+| 对外入口 | nginx `location /accounts/` → `127.0.0.1:3001` |
+| 表 | `accounts`（邮箱、scrypt 密码、显示名、禁用标记）、`apps`（已登记 `suggestion-collection`） |
+| 迁移结果 | 7 个账号按原 UUID 搬过来（`hby8848666@163.com` 当年没设密码，要注册认领） |
+
+接口：`/accounts/health`、`/accounts/auth/register|login|refresh`、`/accounts/me`、
+`/accounts/me/password`、`/accounts/apps`。token 是 HMAC-SHA256 自签，和接口服务共用同一个
+`API_SECRET`，所以两边互认；别的 App 只要拿同一个密钥就能验出请求里的用户是谁。
+
+部署/搬迁用的脚本在 `deploy/accounts/`：
+
+- `deploy/accounts/deploy-server.sh`：建角色和库、写 env、装依赖、起 systemd、给 nginx 插 `/accounts/`（幂等）
+- `deploy/accounts/move-users.js`：把老库 `users` 里的账号按原 UUID 搬进 `accounts`（读 `SRC_DATABASE_URL` / `DST_DATABASE_URL`）
+- `deploy/server/migrate-0.0.10.sql`：建议收集库建 `members`、回填、把外键改指 `members(user_id)`、删掉 `users`
+
+> 顺序是：先跑 `accounts-deploy.sh`，再跑 `move-users.js`，最后跑 `migrate-0.0.10.sql`。
 
 ## 登录服务器
 

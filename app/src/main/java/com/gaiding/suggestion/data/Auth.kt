@@ -7,9 +7,10 @@ import org.json.JSONObject
 /**
  * 账号相关的接口封装：注册、登录、静默续期、退出。
  *
- * 后端是自己服务器上的 /api/auth 系列接口（见 deploy/server/server.js），
+ * 0.0.10 起账号走独立的公共账号服务（deploy/accounts/server.js，地址 Supa.ACCOUNTS），
+ * 它和本应用的数据库完全分开：以后别的 App 也能用同一批账号登录。
  * 登录成功返回 access_token（12 小时）+ refresh_token（60 天），
- * 两个都是服务端用 HMAC 自己签的。
+ * 两个都是账号服务用 HMAC 自己签的，本应用的接口只负责验签。
  */
 object Auth {
     /** 续期彻底失败时回调，用来把用户踢回登录页。 */
@@ -19,12 +20,12 @@ object Auth {
 
     suspend fun signIn(email: String, password: String) {
         val body = JSONObject().put("email", email.trim()).put("password", password)
-        val text = Supa.raw("POST", "/auth/login", body)
+        val text = Supa.raw("POST", "/auth/login", body, base = Supa.ACCOUNTS)
         persist(Supa.obj(text))
     }
 
     /**
-     * 注册。后端会直接把会话返回，所以注册完就是登录状态。
+     * 注册。账号服务会直接把会话返回，所以注册完就是登录状态。
      *
      * 搬过来的老账号第一次「注册」同一个邮箱时会被认领：设上新密码，历史建议还在。
      *
@@ -32,7 +33,7 @@ object Auth {
      */
     suspend fun signUp(email: String, password: String): Boolean {
         val body = JSONObject().put("email", email.trim()).put("password", password)
-        val text = Supa.raw("POST", "/auth/register", body)
+        val text = Supa.raw("POST", "/auth/register", body, base = Supa.ACCOUNTS)
         persist(Supa.obj(text))
         return true
     }
@@ -60,7 +61,7 @@ object Auth {
         if (refresh.isNullOrBlank()) throw Supa.ApiException(401, "登录已失效，请重新登录")
         try {
             // 续期接口要求用 refresh token 当 Bearer，请求体是空的
-            val text = Supa.raw("POST", "/auth/refresh", JSONObject(), refresh)
+            val text = Supa.raw("POST", "/auth/refresh", JSONObject(), refresh, base = Supa.ACCOUNTS)
             val obj = Supa.obj(text)
             SessionStore.updateTokens(
                 access = obj.getString("access_token"),

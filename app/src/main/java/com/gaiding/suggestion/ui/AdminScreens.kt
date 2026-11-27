@@ -78,6 +78,7 @@ import com.gaiding.suggestion.ui.theme.Brand
 import com.gaiding.suggestion.ui.theme.BrandSoft
 import com.gaiding.suggestion.ui.theme.DeepPurple
 import com.gaiding.suggestion.ui.theme.InfoCyan
+import com.gaiding.suggestion.ui.theme.InfoCyanBg
 import com.gaiding.suggestion.ui.theme.Ink
 import com.gaiding.suggestion.ui.theme.InkFaint
 import com.gaiding.suggestion.ui.theme.InkSoft
@@ -264,6 +265,10 @@ fun AdminHome(
                                         "重新执行过 supabase/schema.sql，并且当前账号是管理员。",
                                 )
                             }
+                            reload()
+                        },
+                        onSetNote = { userId, note ->
+                            Repo.setMemberNote(userId, note)
                             reload()
                         },
                     )
@@ -475,6 +480,15 @@ private fun AdminSuggestionCard(
                 style = MaterialTheme.typography.bodySmall,
                 color = InkFaint,
             )
+            val note = row.authorNote
+            if (!note.isNullOrBlank()) {
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    text = "备注：$note",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = InfoCyan,
+                )
+            }
 
             if (s.images.isNotEmpty()) {
                 Spacer(Modifier.height(10.dp))
@@ -537,11 +551,13 @@ private fun ManageTab(
     onCreateProject: suspend (name: String, desc: String) -> Unit,
     onToggleAccess: suspend (projectId: String, userId: String, granted: Boolean) -> Unit,
     onDeleteProject: suspend (projectId: String) -> Unit,
+    onSetNote: suspend (userId: String, note: String?) -> Unit,
 ) {
     val scope = rememberCoroutineScope()
     var showCreate by remember { mutableStateOf(false) }
     var accessUser by remember { mutableStateOf<Profile?>(null) }
     var deleteTarget by remember { mutableStateOf<Project?>(null) }
+    var noteTarget by remember { mutableStateOf<Profile?>(null) }
 
     val members = bundle.users.filter { !it.isAdmin }
 
@@ -623,7 +639,7 @@ private fun ManageTab(
         SectionTitle("成员权限")
         Spacer(Modifier.height(4.dp))
         Text(
-            text = "点一个成员，勾选他可以进入的项目；不勾就看不到也提不了",
+            text = "点一个成员，勾选他可以进入的项目；不勾就看不到也提不了。下面的「备注」只有你自己看得到。",
             style = MaterialTheme.typography.bodySmall,
             color = InkFaint,
         )
@@ -649,29 +665,57 @@ private fun ManageTab(
                         .padding(bottom = 10.dp)
                         .border(1.dp, LineSoft, RoundedCornerShape(16.dp)),
                 ) {
-                    Row(
-                        modifier = Modifier.padding(14.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Avatar(member.label, size = 36)
-                        Spacer(Modifier.width(12.dp))
-                        Column(Modifier.weight(1f)) {
+                    Column(Modifier.padding(14.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Avatar(member.label, size = 36)
+                            Spacer(Modifier.width(12.dp))
+                            Column(Modifier.weight(1f)) {
+                                Text(
+                                    text = member.label,
+                                    style = MaterialTheme.typography.titleMedium,
+                                    color = Ink,
+                                )
+                                Text(
+                                    text = member.email,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = InkFaint,
+                                )
+                            }
                             Text(
-                                text = member.label,
-                                style = MaterialTheme.typography.titleMedium,
-                                color = Ink,
-                            )
-                            Text(
-                                text = member.email,
+                                text = "$granted 个项目",
                                 style = MaterialTheme.typography.bodySmall,
-                                color = InkFaint,
+                                color = if (granted > 0) OkGreen else InkFaint,
                             )
                         }
-                        Text(
-                            text = "$granted 个项目",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = if (granted > 0) OkGreen else InkFaint,
-                        )
+                        Spacer(Modifier.height(10.dp))
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(10.dp))
+                                .clickable { noteTarget = member }
+                                .background(InfoCyanBg)
+                                .padding(horizontal = 10.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                text = "备注",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = InfoCyan,
+                                fontWeight = FontWeight.SemiBold,
+                            )
+                            Spacer(Modifier.width(8.dp))
+                            Text(
+                                text = member.note ?: "点一下写（只有你能看到）",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = if (member.note != null) InkSoft else InkFaint,
+                                modifier = Modifier.weight(1f),
+                            )
+                            Text(
+                                text = "改",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = InfoCyan,
+                            )
+                        }
                     }
                 }
             }
@@ -733,6 +777,67 @@ private fun ManageTab(
             },
         )
     }
+
+    val toNote = noteTarget
+    if (toNote != null) {
+        MemberNoteDialog(
+            user = toNote,
+            onDismiss = { noteTarget = null },
+            onSave = { note ->
+                scope.launch {
+                    try {
+                        onSetNote(toNote.id, note)
+                        noteTarget = null
+                        notify(if (note == null) "备注已清空" else "备注已保存")
+                    } catch (e: Exception) {
+                        notify(Supa.friendly(e))
+                    }
+                }
+            },
+        )
+    }
+}
+
+/** 管理员专用：给某个成员写一句备注，只有管理员自己能看到。 */
+@Composable
+private fun MemberNoteDialog(
+    user: Profile,
+    onDismiss: () -> Unit,
+    onSave: (String?) -> Unit,
+) {
+    var note by remember { mutableStateOf(user.note.orEmpty()) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("给「${user.label}」写备注") },
+        text = {
+            Column {
+                Text(
+                    text = "只有管理员能看到这条备注，对方和其他人都看不到；清空后保存就是删掉备注。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = InkFaint,
+                )
+                Spacer(Modifier.height(12.dp))
+                OutlinedTextField(
+                    value = note,
+                    onValueChange = { if (it.length <= 300) note = it },
+                    placeholder = { Text("比如：同事小王，负责日历那边") },
+                    minLines = 3,
+                    shape = RoundedCornerShape(12.dp),
+                    supportingText = { Text("${note.length}/300") },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { onSave(note.trim().takeIf { it.isNotEmpty() }) }) {
+                Text("保存")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = { note = "" }) { Text("清空", color = InkFaint) }
+        },
+    )
 }
 
 /** 彻底删项目：必须手打项目名才允许按「永久删除」。 */

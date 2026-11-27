@@ -17,9 +17,15 @@ import java.net.URL
  * 0.0.8 起后端从 Supabase 搬到阿里云：地址是 http://39.96.113.178:8080/api，
  * 走明文 http（服务器没备案、没有 https 证书），所以 AndroidManifest 里开了
  * usesCleartextTraffic。
+ *
+ * 0.0.10 起账号（注册、登录、续期）走独立的公共账号服务：/accounts，
+ * 它和 /api 在同一台服务器上，但数据库是分开的，以后别的 App 也能共用这批账号。
  */
 object Supa {
     const val BASE = "http://39.96.113.178:8080/api"
+
+    /** 公共账号服务。以后换服务器/换 App 只改这两行。 */
+    const val ACCOUNTS = "http://39.96.113.178:8080/accounts"
 
     /** 静态文件（建议里带的图片）在站点根目录下，不在 /api 里。 */
     const val SITE = "http://39.96.113.178:8080"
@@ -51,8 +57,9 @@ object Supa {
         path: String,
         body: JSONObject? = null,
         token: String? = null,
+        base: String = BASE,
     ): String = withContext(Dispatchers.IO) {
-        val conn = (URL(BASE + path).openConnection() as HttpURLConnection).apply {
+        val conn = (URL(base + path).openConnection() as HttpURLConnection).apply {
             requestMethod = method
             connectTimeout = 15_000
             readTimeout = 20_000

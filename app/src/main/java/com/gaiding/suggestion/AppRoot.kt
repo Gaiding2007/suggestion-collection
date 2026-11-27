@@ -8,9 +8,11 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.size
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -20,12 +22,16 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.gaiding.suggestion.data.Auth
 import com.gaiding.suggestion.data.Repo
 import com.gaiding.suggestion.data.SavedAccount
 import com.gaiding.suggestion.data.SessionStore
 import com.gaiding.suggestion.data.Supa
+import com.gaiding.suggestion.data.Update
+import com.gaiding.suggestion.data.UpdateInfo
 import com.gaiding.suggestion.ui.AdminHome
 import com.gaiding.suggestion.ui.LoginScreen
 import com.gaiding.suggestion.ui.UserHome
@@ -183,10 +189,18 @@ class AppSession {
 fun AppRoot() {
     val session = remember { AppSession() }
     val scope = rememberCoroutineScope()
+    val context = LocalContext.current
+    var newerVersion by remember { mutableStateOf<UpdateInfo?>(null) }
 
     LaunchedEffect(Unit) {
         Auth.onExpired = { session.account = null }
         session.restore()
+    }
+
+    // 打开软件时顺手看一眼有没有新版本；查不到就什么都不说
+    LaunchedEffect(Unit) {
+        val latest = runCatching { Update.check(context) }.getOrNull() ?: return@LaunchedEffect
+        if (latest.code > Update.currentCode(context)) newerVersion = latest
     }
 
     val account = session.account
@@ -222,6 +236,62 @@ fun AppRoot() {
             onSignOut = { scope.launch { session.signOut() } },
         )
     }
+
+    val newer = newerVersion
+    if (newer != null) {
+        NewVersionDialog(
+            info = newer,
+            currentVersion = BuildConfig.VERSION_NAME,
+            onDownload = {
+                Update.openDownloadPage(context)
+                newerVersion = null
+            },
+            onDismiss = { newerVersion = null },
+        )
+    }
+}
+
+/** 有新版本时的小弹窗：说清楚是哪一版、改了什么、多大，然后带去下载页。 */
+@Composable
+private fun NewVersionDialog(
+    info: UpdateInfo,
+    currentVersion: String,
+    onDownload: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("有新版本 ${info.version}") },
+        text = {
+            Column {
+                Text(
+                    text = "你现在用的是 $currentVersion。新版${if (info.sizeText.isEmpty()) "" else "约 ${info.sizeText}，"}直接覆盖安装就行，数据都在服务器上，不会丢。",
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+                if (info.notes.isNotEmpty()) {
+                    Spacer(Modifier.height(10.dp))
+                    Text(
+                        text = "这一版更新了什么",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = Brand,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        text = info.notes,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = InkFaint,
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDownload) { Text("去下载") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("以后再说") }
+        },
+    )
 }
 
 @Composable

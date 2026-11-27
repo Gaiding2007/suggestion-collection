@@ -3,7 +3,7 @@
 一个自己用的安卓 App：把想法和建议收集起来，由管理员逐条接纳、驳回、标记解决、跟着版本推送。
 一台手机做管理端，其他人的手机做提交端，数据放在自己的阿里云服务器上共享。
 
-当前版本：**v0.0.9**（可以发给同学装了，下载页 http://39.96.113.178:8080/）
+当前版本：**v0.0.10**（可以发给同学装了，下载页 http://39.96.113.178:8080/）
 
 ---
 
@@ -71,23 +71,25 @@ app/src/main/java/com/gaiding/suggestion/
 ├── AppRoot.kt               登录态路由：启动 → 登录页 / 管理台 / 用户首页
 ├── SuggestionApp.kt         Application，初始化本地会话
 ├── data/
-│   ├── Supa.kt              极简 HTTP 客户端（BASE = 服务器 /api，含错误中文化）
-│   ├── Auth.kt              注册、登录、token 自动续期、退出
+│   ├── Supa.kt              极简 HTTP 客户端（BASE = 服务器 /api，ACCOUNTS = /accounts，含错误中文化）
+│   ├── Auth.kt              注册、登录、token 自动续期（都打到公共账号服务）
 │   ├── SessionStore.kt      SharedPreferences 多账号 token
 │   ├── Models.kt            Profile / Project / Suggestion / Status
-│   └── Repo.kt              所有数据读写（项目、授权、建议、状态流转）
+│   ├── Update.kt            打开时查 versions.json，有新版本就弹窗
+│   └── Repo.kt              所有数据读写（项目、授权、建议、状态流转、成员备注）
 └── ui/
     ├── Common.kt            时间格式、状态胶囊、按钮、空状态等公共组件
     ├── LoginScreen.kt       登录 / 注册（含「选择账号进入」）
     ├── UserScreens.kt       普通用户：项目列表 → 项目详情 → 提建议
-    ├── AdminScreens.kt      管理员：新反馈 / 待办 / 已解决 / 管理（项目 + 权限）
+    ├── AdminScreens.kt      管理员：新反馈 / 待办 / 已解决 / 管理（项目 + 权限 + 成员备注）
     ├── AccountSwitch.kt     顶栏「切换」账号弹窗
     ├── ImageBits.kt         图片：压缩上传、缩略图、点开看大图
     └── theme/Theme.kt       配色和字体
 deploy/
-├── server/                  自己的后端：schema.sql、server.js、import.js、部署脚本
-├── site/                    下载页 + versions.json
-├── nginx-suggestion.conf    nginx 配置（8080 静态 + /api/ 反代）
+├── accounts/                公共账号服务：schema.sql、server.js、搬账号脚本、部署脚本
+├── server/                  建议收集自己的后端：schema.sql、server.js、import.js、迁移脚本
+├── site/                    下载页 + versions.json（含每版的 code，给自动更新用）
+├── nginx-suggestion.conf    nginx 配置（8080 静态 + /api/ 与 /accounts/ 反代）
 ├── upload.ps1               一条命令发新版（传 APK + 更新清单）
 └── migrate-dump.sh          从 Supabase 搬数据用（一次性）
 supabase/schema.sql          0.0.7 及以前的 Supabase 方案（留作归档，新后端不用它）
@@ -104,16 +106,18 @@ log.md                       项目记忆 + 每个版本的改动日志
 | --- | --- |
 | 下载页 + APK | `/var/www/suggestion/`（`http://39.96.113.178:8080/`） |
 | 建议图片 | `/var/www/suggestion/uploads/`（`http://39.96.113.178:8080/uploads/<名字>.jpg`） |
-| 接口代码 | `/opt/suggestion-api/`（systemd 服务 `suggestion-api`） |
-| 数据库 | PostgreSQL 18，库/用户都是 `suggestion`，只监听 `127.0.0.1` |
-| 配置 | `/etc/suggestion-api.env`（连库串 + 签名密钥，600 权限） |
-| nginx | `/etc/nginx/sites-available/suggestion`（8080 静态 + `/api/` 反代 3000） |
+| 建议收集接口 | `/opt/suggestion-api/`（systemd 服务 `suggestion-api`，端口 3000） |
+| 账号服务 | `/opt/accounts-api/`（systemd 服务 `accounts-api`，端口 3001，nginx `/accounts/` 反代） |
+| 建议收集数据库 | PostgreSQL 18，库/用户 `suggestion`，只监听 `127.0.0.1` |
+| 账号数据库 | 同一个 PostgreSQL，库/用户 `accounts`（和上面的库完全分开，以后别的软件也连这个） |
+| 配置 | `/etc/suggestion-api.env`、`/etc/accounts-api.env`（各 600，共用同一个签名密钥） |
+| nginx | `/etc/nginx/sites-available/suggestion`（8080 静态 + `/api/` 反代 3000 + `/accounts/` 反代 3001） |
 
 日常操作就三条：
 
-1. **发新版本**：`dist/` 里放好 APK、`deploy/site/versions.json` 加一行 → `powershell -File deploy\upload.ps1 -OnlyVersion 0.0.x`
-2. **看服务状态**：`systemctl status suggestion-api`、`journalctl -u suggestion-api -n 50`
-3. **改表结构**：改 `deploy/server/schema.sql` 后在服务器上 `psql -f schema.sql`（脚本可重复执行）
+1. **发新版本**：`dist/` 里放好 APK、`deploy/site/versions.json` 加一行（记得填 `code`，自动更新靠它比对）→ `powershell -File deploy\upload.ps1 -OnlyVersion 0.0.x`
+2. **看服务状态**：`systemctl status suggestion-api`、`systemctl status accounts-api`、`journalctl -u suggestion-api -n 50`
+3. **改表结构**：改 `deploy/server/schema.sql`（或 `deploy/accounts/schema.sql`）后在服务器上 `psql -f`（脚本可重复执行）
 
 > 详细步骤见 [`deploy/README.md`](deploy/README.md)。0.0.7 及以前用的是 Supabase 免费云，
 > 0.0.8 起数据和账号都在自己服务器上，Supabase 那边可以删掉了。
@@ -171,10 +175,11 @@ keyPassword=你的密码
 ## 数据安全说明
 
 - 接口在服务端做权限判断：普通用户只能拿到自己有权进入的项目和建议，改状态、删项目、开权限这些只有管理员能调
-- 登录用 scrypt 加盐哈希存密码，会话是 HMAC-SHA256 自签的 token（12 小时），刷新 token 60 天
+- 登录用 scrypt 加盐哈希存密码，会话是 HMAC-SHA256 自签的 token（12 小时），刷新 token 60 天；账号存在独立的账号服务里，建议收集库只留「这个人在本应用里是谁、是不是管理员、我给他写的备注」
+- 管理员备注只给管理员返回：普通用户的 `/home` 里 `members` 是空数组，接口层已经验证过
 - 提建议时 `author_id` 由服务端填，客户端传不进来
 - 上传图片走 `/api/upload`，必须登录才能传；只认 JPG / PNG 文件头，单张 5 MB 上限，超过 3 张直接拒；删建议或删项目时会把对应图片文件一起删掉
-- PostgreSQL 只监听 `127.0.0.1`，安全组只开 8080、22，数据库端口不对公网开放
+- PostgreSQL 只监听 `127.0.0.1`，安全组只开 8080、22，数据库端口不对公网开放（`suggestion` 和 `accounts` 两个库都这样）
 - 明文 http 的代价：同一 wifi 下懂行的人能抓包看到 token，自己小范围用够了；以后有域名 + 证书再换 https
 
 ---
@@ -183,6 +188,7 @@ keyPassword=你的密码
 
 | 版本 | 内容 |
 | --- | --- |
+| 0.0.10 | 账号独立成公共账号服务（以后别的软件能共用同一批账号）；打开软件自动检查新版本；管理员可以给每个成员写私密备注（只有管理员看得到） |
 | 0.0.9 | 自己提的建议标「我的反馈」；提建议可上传图片（最多 3 张，JPG/PNG），列表看缩略图、点开看大图，管理员也能看到图 |
 | 0.0.8 | 后端从 Supabase 搬到自己的服务器（历史 3 账号 / 4 项目 / 31 条建议全部迁好）；老账号点「注册」用原邮箱设新密码即可认领 |
 | 0.0.7 | 管理台四个页签改成等宽分段控件，带数字的标签不会再被截成「…」 |

@@ -98,6 +98,10 @@
 - **远程跑 SQL / Node 不要拼嵌套引号**：PowerShell → ssh → bash → psql 四层引号一定会被剥掉（报 `syntax error near unexpected token '('` 或 `extra command-line argument ... ignored`）。稳定做法：本地写 `.sh`（`#!/usr/bin/env bash`）→ `scp` 上去 → `ssh 'bash /root/upload/x.sh'`，脚本里再用 `psql "$DATABASE_URL" -c "..."`；`sed -i 's/\r$//'` 去掉 CRLF 和 BOM
 - **服务器上的 Node 脚本要带 `NODE_PATH`**：`pg` 装在 `/opt/suggestion-api/node_modules`，把脚本放 `/root/upload/` 跑会 `Cannot find module 'pg'`。用 `cd /opt/suggestion-api && NODE_PATH=/opt/suggestion-api/node_modules node /root/upload/x.js`
 - **adb 自动化要点（0.0.9 补）**：一次 `adb shell "..."` 里串起多条命令（`am start; sleep; input tap; ...; screencap`）最可靠，主机端分次调用期间前台很容易被别的 App 抢走；填表单必须「点框 → input text → keyevent 4 收键盘 → 重新截图定位」，键盘弹出会让下半屏整体上移；`adb shell screencap -p /sdcard/x.png` 会被相册索引，选图时记得先 `rm -f /sdcard/*.png`，测试图往 `/sdcard/Pictures/` 放
+- **`adb shell input text` 只认 ASCII**（0.0.10 踩过）：输入中文会抛 `java.lang.NullPointerException: Attempt to get length of null array`（`InputShellCommand.sendText`），UI 自动化里中文备注只能用英文/数字代替，等真机手输验证
+- **bash 里 `UID` 是只读变量**（0.0.10）：脚本里 `UID=$(...)` 会报 `UID: readonly variable`，用 `USERID` 之类别名
+- **`psql` 同名参数推断不出类型**（0.0.10）：`update ... set note = $1, note_updated_at = case when $1 is null ...` 会报 `could not determine data type of parameter $1`（同一个占位符第二次出现且可能为 null）。写法改成 `$1::text`
+- **`scp` 同名文件会互相覆盖**（0.0.10）：`deploy/server/server.js` 和 `deploy/accounts/server.js` 都传到 `/root/upload/` 时只剩一个，上传前先重命名成 `accounts-server.js` 这种带前缀的名字
 
 ## 8. 发布流程（每个版本都这么做）
 
@@ -132,12 +136,21 @@
   - 接口：`/auth/register|login|refresh`、`/me`、`/home`、`/projects`(POST/DELETE)、`/projects/:id/access`(PUT)、`/suggestions`(POST)、`/suggestions/:id`(PATCH/DELETE)、`/suggestions/:id/{accept|reject|resolve|push|reopen}`
   - 数据搬迁：服务器上 `curl` 得到 Supabase（那边能连通）→ `deploy/migrate-dump.sh` 导出 JSON 到 `/root/migration` → `deploy/server/import.js` 灌库；结果 3 账号（1 管理员）/ 4 项目 / 6 授权 / 31 条建议，`claimed` 全为 false
   - App 侧改动：`Supa.BASE = "http://39.96.113.178:8080/api"`（去掉 apikey）、`Auth` 换 `/auth/*`、`Repo` 换新端点、Manifest 加 `android:usesCleartextTraffic="true"`
+- **账号独立成公共服务（2026-11-27，0.0.10 起）**：
+  - 独立的库 `accounts`（角色/库同名）+ 独立服务 `/opt/accounts-api/server.js`（端口 3001，systemd `accounts-api`），nginx 用 `location /accounts/` 反代；环境变量 `/etc/accounts-api.env`（600），和接口服务共用同一个 `API_SECRET`，所以两边都能验同一个 token
+  - 账号库只有两张表：`accounts`（邮箱、scrypt 密码、显示名、禁用标记）+ `apps`（现在登记了 `suggestion-collection`）。以后别的软件要共用账号，直接调 `http://39.96.113.178:8080/accounts/auth/*` 就行
+  - 建议收集这边不再有 `users` 表，改成 `members`（`user_id / email / display_name / is_admin / note / note_updated_at / last_seen_at`）；`projects.created_by`、`project_access.user_id`、`suggestions.author_id`、`suggestions.handled_by` 全部改用账号服务的 UUID
+  - 迁移脚本：`deploy/accounts/move-users.js`（7 个账号按原 UUID 搬过去）+ `deploy/server/migrate-0.0.10.sql`（建 `members`、回填、重挂外键、删 `users`）
+  - 新库第一次登录本应用的人会自动成为这个应用的管理员；现在 `members` 里管理员仍是 `1412759076@qq.com` 一个
 - 每次发新版：`deploy\upload.ps1` 会把 `dist` 里的 APK 和下载页一起推上去并 curl 自检
 - **传命令的坑**：PowerShell 5.1 会剥掉远端命令里的双引号、把反引号当命令替换、把 `\$VAR` 吃掉。稳的做法是把脚本写成本地文件 → `scp` → `bash /path/x.sh`；一次性命令用 PS 单引号包整体、内部只用单引号给 bash。写 env 文件别用 PS 的 `printf "...\n"`（`\n` 会变成一个字母 `n`，曾把库名写成 `suggestionn`）
 
 ## 11. 现在的待办 / 以后可能要做
 
 - [ ] 找回密码（发重置邮件）
+- [x] 账号系统独立成公共服务，可以让别的软件共用（0.0.10）
+- [x] 打开软件自动检查新版本（0.0.10，直接读下载页的 `versions.json`）
+- [x] 管理员给成员写私密备注（0.0.10，只有管理员能读）
 - [ ] 推送后给提交人发通知（本地或 FCM）
 - [ ] 建议详情页 + 评论讨论
 - [ ] 项目归档（表里已有 `is_archived`，界面还没做；现在只有彻底删除）
@@ -557,3 +570,57 @@
 2. 数据库这一列**我已经在服务器上跑过了**，不用你动手
 3. 打开随便一条建议，试试传图、点开大图、看看「我的反馈」标签对不对
 
+
+## v0.0.10 — 2026-11-27
+
+这一版把账号从「建议收集自己的表」搬成一个独立服务，另外补了两个小功能：打开软件自动检查更新、管理员给成员写私密备注。
+
+### 1. 账号独立成公共服务（用户需求：以后别的软件共用同一批账号）
+
+- 新建库 `accounts`（PostgreSQL 角色/库同名）+ 新服务 `/opt/accounts-api/server.js`（端口 3001，systemd `accounts-api`，nginx `location /accounts/` 反代）
+- 表只有两张：`accounts`（邮箱、scrypt 密码、显示名、`is_disabled`）+ `apps`（登记了 `suggestion-collection`，以后加软件就往这里加一行）
+- 接口：`/accounts/auth/register|login|refresh`、`/accounts/me`、`/accounts/me/password`、`/accounts/apps`、`/accounts/health`；token 还是 HMAC-SHA256，和接口服务共用同一个 `API_SECRET`，所以两边的 token 互认
+- 建议收集这边删掉了 `users` 表，改用 `members`（`user_id / email / display_name / is_admin / note / note_updated_at / last_seen_at`）；`projects.created_by`、`project_access.user_id`、`suggestions.author_id`、`suggestions.handled_by` 全部改指账号服务的 UUID
+- App 的登录/注册/续期改打 `/accounts/auth/*`，`/me`、`/home` 还是走建议收集接口（`/me` 回 `is_admin`，管理台只认这个应用的管理员）
+- 迁移结果：7 个账号按原 UUID 搬过去（其中 `hby8848666@163.com` 当年没设密码，需要注册认领）；`members=7`、管理员 1 个、项目 7 个、建议 47 条一条没少
+
+### 2. 打开软件自动检查更新
+
+- 新增 `data/Update.kt`：启动时拉 `http://39.96.113.178:8080/versions.json`，比对里面的 `code` 和当前 `versionCode`
+- `versions.json` 每个版本补了 `code` 字段（0.0.10=10、0.0.9=9 …），App 取 `code` 最大的一条
+- 有新版就弹窗：「有新版本 x.y.z / 你现在用的是 x.y.z / 新版约 x MB，直接覆盖安装就行，数据都在服务器上，不会丢」，按钮「去下载」（用浏览器打开下载页）和「以后再说」；网络不通就静默跳过，不打扰
+
+### 3. 管理员给成员写私密备注（用户需求：只有该管理员能看到）
+
+- 数据库 `members.note`（≤300 字）+ `note_updated_at`
+- 接口 `PUT /api/members/:id/note`，只有管理员能调（普通用户 403），空字符串/`null` 表示清空
+- 「管理 → 成员权限」每张成员卡片下面多一行浅蓝的「备注」，没写时显示「点一下写（只有你能看到）」，点开是弹窗，带 300 字计数和「清空」
+- 管理台的建议卡片在「来自 xxx」下面多一行「备注：…」，方便看着建议时知道这个人是谁
+- 隐私边界：`/home` 只给管理员返回 `members`（含备注），普通用户拿到的是空数组，接口层已经用普通账号验证过「返回里没有备注内容」
+
+### 验证
+
+- 服务端：`node --check` 通过；`/accounts/health` 和 `http://39.96.113.178:8080/accounts/health` 都返回 `{"ok":true}`；迁移脚本输出 `INSERT 0 7` / `DROP TABLE` / `COMMIT`
+- 接口层（服务器上跑的脚本）：新账号注册 → `/api/me` 自动建 member（`is_admin=false`）→ 非管理员写备注 403 → 管理员写备注 200 且有 `note_updated_at` → 管理员 `/api/home` 能看到备注 → 普通用户 `/api/home` 的 `members` 是 `[]` 且整段返回里没有备注内容 → 清理后 `members=7 / admins=1 / notes=0`
+- App（模拟器 0.0.10 debug 包）：登录进管理台正常（新反馈 0 / 待办 4 / 已解决 43，47 条历史建议都在）；「管理」页成员卡片带备注行（截图 `dist/member-note-0.0.10.png`）；点开是「给「aaa」写备注」弹窗（截图 `dist/note-dialog-0.0.10.png`）；管理台已解决列表在「来自 aaa」下面显示「备注：同事 aaa，负责日历」（截图 `dist/note-card-0.0.10.png`）
+- 自动更新：临时把 `versions.json` 顶上加一条假的 0.0.11，重启 App 弹出「有新版本 0.0.11」（截图 `dist/update-dialog-0.0.10.png`），点「去下载」能打开浏览器下载页；验证完已把 `versions.json` 恢复
+
+### 踩过的坑
+
+- `psql` 里 `$1` 用两次且可能为 null 时推断不出类型，报 `could not determine data type of parameter $1`，要写 `$1::text`
+- `adb shell input text` 不支持中文（`NullPointerException`），自动化时只能先用英文验
+- `scp` 两个同名 `server.js` 到同一个目录会互相覆盖，上传前改名加前缀
+- bash 里 `UID` 是只读变量
+
+### 已知限制
+
+- 账号服务还是明文 http：token 在同一个 wifi 下理论可被抓包
+- 还没有找回密码；账号服务也还没有「删除账号」「邮箱验证」这些
+- 管理员备注现在一个应用一份（`members.note`），不是账号级别的
+- 自动更新只是提示 + 跳浏览器，不做 App 内静默下载安装（那要额外权限和签名校验）
+
+### 用户要做的
+
+1. 手机上装 0.0.10（覆盖安装即可，账号和数据都在服务器上）
+2. 打开后应该会看到版本号变成 v0.0.10；以后有新版，开 App 会自己弹提示
+3. 进「管理 → 成员权限」，随便给一个成员点「备注」写一句试试

@@ -1,8 +1,17 @@
 {
-    "updated":  "2026-11-24",
+    "updated":  "2026-11-27",
     "items":  [
                   {
+                      "version":  "0.0.10",
+                      "code":  10,
+                      "file":  "apk/suggestion-collection-0.0.10.apk",
+                      "size":  7206557,
+                      "date":  "2026-11-27",
+                      "notes":  "账号搬进独立的公共账号服务（以后别的软件也能共用同一批账号）；打开软件会自动检查新版本；管理员可以给每个成员写一句备注，只有管理员自己看得到"
+                  },
+                  {
                       "version":  "0.0.9",
+                      "code":  9,
                       "file":  "apk/suggestion-collection-0.0.9.apk",
                       "size":  7190169,
                       "date":  "2026-11-24",
@@ -10,6 +19,7 @@
                   },
                   {
                       "version":  "0.0.8",
+                      "code":  8,
                       "file":  "apk/suggestion-collection-0.0.8.apk",
                       "size":  7173785,
                       "date":  "2026-11-23",
@@ -17,6 +27,7 @@
                   },
                   {
                       "version":  "0.0.7",
+                      "code":  7,
                       "file":  "apk/suggestion-collection-0.0.7.apk",
                       "size":  7173773,
                       "date":  "2026-11-23",
@@ -24,6 +35,7 @@
                   },
                   {
                       "version":  "0.0.6",
+                      "code":  6,
                       "file":  "apk/suggestion-collection-0.0.6.apk",
                       "size":  7173769,
                       "date":  "2026-11-23",
@@ -31,6 +43,7 @@
                   },
                   {
                       "version":  "0.0.5",
+                      "code":  5,
                       "file":  "apk/suggestion-collection-0.0.5.apk",
                       "size":  7173773,
                       "date":  "2026-11-23",
@@ -38,6 +51,7 @@
                   },
                   {
                       "version":  "0.0.4",
+                      "code":  4,
                       "file":  "apk/suggestion-collection-0.0.4.apk",
                       "size":  7173773,
                       "date":  "2026-11-23",
